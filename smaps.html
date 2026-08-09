@@ -1,0 +1,786 @@
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>SixthSense Lab v0.2</title>
+<style>
+  :root{--bg:#0e1116;--panel:#161b23;--panel2:#1c232d;--line:#2a3441;--ink:#e6edf5;
+        --dim:#8b98a8;--accent:#4da3ff;--good:#3fcf8e;--warn:#f0b429;--bad:#f0654a;
+        --mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--ink);
+       font:14px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+  header{padding:12px 16px;border-bottom:1px solid var(--line);display:flex;
+         align-items:center;gap:10px;flex-wrap:wrap;background:var(--panel);
+         position:sticky;top:0;z-index:9}
+  h1{font-size:15px;margin:0}
+  .sub{color:var(--dim);font-size:11px}
+  nav{display:flex;gap:5px;margin-left:auto}
+  nav button{background:var(--panel2);color:var(--dim);border:1px solid var(--line);
+    padding:7px 12px;border-radius:6px;cursor:pointer;font-size:12px}
+  nav button.on{background:var(--accent);color:#04121f;border-color:var(--accent);font-weight:600}
+  main{padding:14px 16px;max-width:1180px}
+  .tab{display:none}.tab.on{display:block}
+  .grid{display:grid;gap:14px}
+  .g2{grid-template-columns:370px 1fr}
+  @media(max-width:920px){.g2{grid-template-columns:1fr}nav{width:100%;margin-left:0}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px}
+  .card h2{font-size:12px;margin:0 0 10px;color:var(--dim);text-transform:uppercase;
+           letter-spacing:.09em;font-weight:600;display:flex;gap:8px;align-items:center}
+  label{display:block;font-size:12px;color:var(--dim);margin:10px 0 4px}
+  input[type=range]{width:100%;accent-color:var(--accent);height:26px}
+  input[type=text],select{width:100%;background:var(--bg);color:var(--ink);
+    border:1px solid var(--line);border-radius:6px;padding:9px 10px;font-size:14px;font-family:inherit}
+  button.act{background:var(--accent);color:#04121f;border:0;border-radius:8px;
+    padding:13px 18px;font-weight:700;cursor:pointer;font-size:14px}
+  button.act.big{width:100%;padding:18px;font-size:16px}
+  button.act:disabled{opacity:.3}
+  button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);
+    border-radius:8px;padding:11px 14px;cursor:pointer;font-size:13px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .stat{font-family:var(--mono);font-size:24px;font-weight:700}
+  .statlbl{font-size:10px;color:var(--dim);text-transform:uppercase;letter-spacing:.07em}
+  .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  table{width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px}
+  th{text-align:left;color:var(--dim);font-weight:600;padding:6px;border-bottom:1px solid var(--line);
+     text-transform:uppercase;font-size:10px;letter-spacing:.05em}
+  td{padding:6px;border-bottom:1px solid #202833}
+  .scroll{max-height:260px;overflow:auto}
+  .note{font-size:12px;color:var(--dim);line-height:1.6}
+  .pill{display:inline-block;font-size:10px;padding:2px 8px;border-radius:20px;
+        border:1px solid var(--line);color:var(--dim);font-family:var(--mono)}
+  .pill.ok{color:var(--good);border-color:#1f5e45}
+  .pill.no{color:var(--bad);border-color:#66302a}
+  .pill.wa{color:var(--warn);border-color:#6b5417}
+  canvas{display:block;background:#0a0d12;border-radius:10px;border:1px solid var(--line);
+         width:100%;height:auto;touch-action:none}
+  video{width:100%;border-radius:10px;background:#000;display:block}
+  .wrap{position:relative}.wrap canvas.ov{position:absolute;inset:0;height:100%;border:0;background:transparent}
+  kbd{background:var(--panel2);border:1px solid var(--line);border-bottom-width:2px;
+      border-radius:4px;padding:1px 6px;font-family:var(--mono);font-size:11px}
+  .banner{background:#1a2331;border:1px solid #2b3d55;border-left:3px solid var(--accent);
+          padding:11px 13px;border-radius:8px;font-size:13px;margin-bottom:14px;line-height:1.6}
+  .sw{display:flex;gap:6px;background:var(--bg);border:1px solid var(--line);
+      border-radius:8px;padding:3px}
+  .sw button{flex:1;background:transparent;border:0;color:var(--dim);padding:9px 4px;
+      border-radius:6px;font-size:12px;cursor:pointer}
+  .sw button.on{background:var(--panel2);color:var(--ink);font-weight:600}
+  code{background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:12px}
+</style>
+
+<header>
+  <h1>SixthSense Lab</h1><span class="sub">v0.2</span>
+  <nav>
+    <button id="tabA" class="on">Lab</button>
+    <button id="tabC">Results</button>
+    <button id="tabB">Room</button>
+  </nav>
+</header>
+
+<main>
+
+<section class="tab on" id="secA">
+  <div class="grid g2">
+    <div class="grid" style="align-content:start">
+
+      <div class="card">
+        <h2>Head source <span class="pill" id="hsP">keyboard</span></h2>
+        <div class="sw" id="hsSw">
+          <button data-v="key" class="on">Keyboard / dial</button>
+          <button data-v="phone">Phone sensor</button>
+        </div>
+        <div id="phoneBox" style="display:none">
+          <div class="row" style="margin-top:10px">
+            <button class="act" id="sensOn">Enable motion</button>
+            <button class="ghost" id="zero">Face forward &middot; zero</button>
+          </div>
+          <p class="note" id="sensMsg" style="margin-top:8px">
+            Mount the phone rigidly to your head — a rubber band around the headband of over-ear
+            headphones works, or tucked in a cap. Any fixed orientation is fine; calibration
+            works it out. Face straight ahead, then tap zero.
+          </p>
+          <p class="note" style="margin-top:6px">
+            yaw <b id="yawR" style="color:var(--ink);font-family:var(--mono)">0&deg;</b>
+            &middot; axis <span id="axR" class="pill">—</span>
+            &middot; events <span id="cntR" class="pill">0</span>
+          </p>
+          <p class="note" style="margin-top:2px;font-family:var(--mono);font-size:11px">
+            src <span id="evR">—</span><br>raw <span id="rawR">—</span>
+          </p>
+          <div class="row" style="margin-top:6px">
+            <button class="ghost" id="gyroBtn" style="font-size:12px;padding:8px 12px">
+              Try gyro fallback</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Condition</h2>
+        <div class="sw" id="condSw">
+          <button data-v="dynamic" class="on">Dynamic</button>
+          <button data-v="static">Static</button>
+        </div>
+        <p class="note" style="margin-top:8px" id="condNote">
+          Beacon keeps playing while you turn.
+        </p>
+
+        <h2 style="margin-top:16px">Frontal clamp</h2>
+        <div class="sw" id="clampSw">
+          <button data-v="off" class="on">Off</button>
+          <button data-v="on">On &plusmn;80&deg;</button>
+        </div>
+        <p class="note" style="margin-top:8px">
+          A rear source is rendered at the edge of the frontal hemisphere and muffled.
+          Turn toward it and the clamp releases as the true bearing comes round.
+        </p>
+
+        <label>Beacon</label>
+        <select id="btype">
+          <option value="click">Click train — broadband bursts</option>
+          <option value="tone">Tone pulse — 800 Hz</option>
+          <option value="sweep">Sweep — 400 to 2000 Hz</option>
+        </select>
+
+        <label>Pulse rate &mdash; <span id="rateV" class="pill">2.0 /s</span></label>
+        <input type="range" id="rate" min="0.5" max="6" step="0.5" value="2">
+        <label>Distance &mdash; <span id="distV" class="pill">2.5 m</span></label>
+        <input type="range" id="dist" min="1" max="6" step="0.5" value="2.5">
+      </div>
+
+      <div class="card">
+        <h2>Eyes-free mode <span class="pill" id="efP">off</span></h2>
+        <div class="sw" id="efSw">
+          <button data-v="off" class="on">Off</button>
+          <button data-v="on">On</button>
+        </div>
+        <label>Dwell to answer &mdash; <span id="dwellV" class="pill">1.5 s</span></label>
+        <input type="range" id="dwell" min="0.8" max="4" step="0.1" value="1.5">
+        <p class="note" style="margin-top:8px">
+          With the phone on your head you cannot reach the screen. Eyes-free mode speaks each
+          prompt, commits when you hold still, reads back the error, and starts the next trial.
+          A whole 20-trial block runs without you touching anything.
+        </p>
+      </div>
+    </div>
+
+    <div class="grid" style="align-content:start">
+      <div class="card">
+        <h2>Head <span class="pill" id="stateP">idle</span></h2>
+        <canvas id="dial" width="460" height="460"></canvas>
+        <div class="row" style="margin-top:12px">
+          <button class="act big" id="startT">Start trial</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button class="ghost" id="answer" disabled style="flex:1">Answer</button>
+          <button class="ghost" id="abort" style="flex:1">Stop block</button>
+        </div>
+        <p class="note" style="margin-top:8px">
+          <kbd>&larr;</kbd><kbd>&rarr;</kbd> turn 3&deg; &middot; <kbd>Shift</kbd> 15&deg; &middot;
+          <kbd>Enter</kbd> answer / next
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>This block</h2>
+        <div class="stats">
+          <div><div class="stat" id="sN">0</div><div class="statlbl">trials</div></div>
+          <div><div class="stat" id="sMed">—</div><div class="statlbl">median err</div></div>
+          <div><div class="stat" id="sFB">—</div><div class="statlbl">reversals</div></div>
+          <div><div class="stat" id="sLat">—</div><div class="statlbl">median s</div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="tab" id="secC">
+  <div class="banner">
+    Your v0.1 run is preloaded as a baseline — 36 dynamic trials, keyboard head source.
+    New trials append. In the scatter, every point above 21&deg; sits in a shaded rear band.
+  </div>
+  <div class="grid g2">
+    <div class="grid" style="align-content:start">
+      <div class="card">
+        <h2>Breakdown</h2>
+        <div class="scroll" style="max-height:420px">
+          <table><thead><tr><th>cell</th><th>n</th><th>med</th><th>rev</th></tr></thead>
+          <tbody id="brk"></tbody></table>
+        </div>
+        <div class="row" style="margin-top:12px">
+          <button class="ghost" id="csv">Export CSV</button>
+          <button class="ghost" id="clr">Clear new</button>
+        </div>
+      </div>
+    </div>
+    <div class="grid" style="align-content:start">
+      <div class="card">
+        <h2>Absolute error vs true bearing</h2>
+        <canvas id="plot" width="760" height="420"></canvas>
+      </div>
+      <div class="card">
+        <h2>Trial log</h2>
+        <div class="scroll">
+          <table><thead><tr><th>#</th><th>cond</th><th>clamp</th><th>src</th><th>true</th>
+            <th>ans</th><th>err</th><th>F/B</th><th>s</th></tr></thead>
+          <tbody id="log"></tbody></table>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="tab" id="secB">
+  <div class="banner">
+    Camera needs a secure origin. Over a hosted https link it works on the phone too.
+    From <code>file://</code> Chrome refuses it.
+  </div>
+  <div class="grid g2">
+    <div class="grid" style="align-content:start">
+      <div class="card">
+        <h2>Camera</h2>
+        <div class="row"><button class="act" id="camOn">Enable camera</button></div>
+        <label>Horizontal FOV &mdash; <span id="fovV" class="pill">60&deg;</span></label>
+        <input type="range" id="fov" min="40" max="100" step="1" value="60">
+        <p class="note" id="camMsg" style="margin-top:8px">
+          Click an object in the feed to set its bearing, then commit.
+        </p>
+      </div>
+      <div class="card">
+        <h2>Place object</h2>
+        <label>Label</label><input type="text" id="lbl" value="keys">
+        <label>Resting on</label><input type="text" id="sup" value="table">
+        <label>Distance &mdash; <span id="odV" class="pill">2.5 m</span></label>
+        <input type="range" id="od" min="0.5" max="8" step="0.1" value="2.5">
+        <div class="row" style="margin-top:10px">
+          <button class="act" id="commit" disabled>Commit</button>
+          <button class="ghost" id="wipe">Wipe</button>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Ask</h2>
+        <input type="text" id="q" placeholder="where are my keys?">
+        <div class="row" style="margin-top:8px">
+          <button class="act" id="ask">Ask</button>
+          <button class="ghost" id="stopB">Stop</button>
+        </div>
+        <p class="note" id="ans" style="margin-top:10px;color:var(--ink);min-height:36px">—</p>
+        <p class="note" id="lat"></p>
+      </div>
+    </div>
+    <div class="grid" style="align-content:start">
+      <div class="card"><h2>Feed <span class="pill" id="camP">off</span></h2>
+        <div class="wrap"><video id="vid" playsinline muted></video>
+        <canvas class="ov" id="ov" width="640" height="480"></canvas></div></div>
+      <div class="card"><h2>Room map</h2><canvas id="map" width="460" height="420"></canvas></div>
+      <div class="card"><h2>Memory</h2><div class="scroll"><table>
+        <thead><tr><th>label</th><th>on</th><th>x</th><th>z</th></tr></thead>
+        <tbody id="mem"></tbody></table></div></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<script>
+const wrap=a=>{while(a>Math.PI)a-=2*Math.PI;while(a<-Math.PI)a+=2*Math.PI;return a};
+const deg=r=>r*180/Math.PI, rad=d=>d*Math.PI/180;
+const med=a=>{if(!a.length)return null;const s=a.slice().sort((x,y)=>x-y),m=s.length>>1;
+  return s.length%2?s[m]:(s[m-1]+s[m])/2};
+const $=id=>document.getElementById(id);
+
+let AC=null,panner=null,master=null,lpf=null,timer=null,noiseBuf=null;
+const S={yaw:0,bearing:0,dist:2.5,playing:false,clamped:false};
+function audio(){
+  if(AC)return AC;
+  AC=new(window.AudioContext||window.webkitAudioContext)();
+  master=AC.createGain();master.gain.value=.9;master.connect(AC.destination);
+  lpf=AC.createBiquadFilter();lpf.type='lowpass';lpf.frequency.value=20000;lpf.connect(master);
+  panner=AC.createPanner();panner.panningModel='HRTF';panner.distanceModel='inverse';
+  panner.refDistance=.8;panner.rolloffFactor=.7;panner.maxDistance=25;panner.connect(lpf);
+  noiseBuf=AC.createBuffer(1,Math.floor(AC.sampleRate*.12),AC.sampleRate);
+  const d=noiseBuf.getChannelData(0);for(let i=0;i<d.length;i++)d[i]=Math.random()*2-1;
+  return AC;
+}
+function setListener(y){if(!AC)return;const fx=Math.sin(y),fz=-Math.cos(y),t=AC.currentTime;
+  if(AC.listener.forwardX){AC.listener.forwardX.setValueAtTime(fx,t);
+    AC.listener.forwardY.setValueAtTime(0,t);AC.listener.forwardZ.setValueAtTime(fz,t);
+    AC.listener.upX.setValueAtTime(0,t);AC.listener.upY.setValueAtTime(1,t);
+    AC.listener.upZ.setValueAtTime(0,t);}else AC.listener.setOrientation(fx,0,fz,0,1,0);}
+function setListenerPos(x,z){if(!AC)return;const t=AC.currentTime;
+  if(AC.listener.positionX){AC.listener.positionX.setValueAtTime(x,t);
+    AC.listener.positionY.setValueAtTime(0,t);AC.listener.positionZ.setValueAtTime(z,t);}
+  else AC.listener.setPosition(x,0,z);}
+function setSource(x,z){if(!panner)return;const t=AC.currentTime;
+  if(panner.positionX){panner.positionX.setValueAtTime(x,t);panner.positionY.setValueAtTime(0,t);
+    panner.positionZ.setValueAtTime(z,t);}else panner.setPosition(x,0,z);}
+const worldPos=(b,d)=>({x:d*Math.sin(b),z:-d*Math.cos(b)});
+const CLAMP=rad(80);
+function applyClamp(rel){
+  if(cfg.clamp!=='on')return{b:rel,c:false};
+  if(Math.abs(rel)<=CLAMP)return{b:rel,c:false};
+  return{b:Math.sign(rel)*CLAMP,c:true};
+}
+function burst(type,muffle){
+  const t=AC.currentTime,g=AC.createGain();g.connect(panner);
+  lpf.frequency.setTargetAtTime(muffle?900:20000,t,.02);
+  if(type==='click'){
+    const s=AC.createBufferSource();s.buffer=noiseBuf;
+    const bp=AC.createBiquadFilter();bp.type='bandpass';bp.frequency.value=2200;bp.Q.value=.6;
+    s.connect(bp);bp.connect(g);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.9,t+.004);
+    g.gain.exponentialRampToValueAtTime(.0008,t+.10);s.start(t);s.stop(t+.13);
+  }else if(type==='tone'){
+    const o=AC.createOscillator();o.type='sine';o.frequency.value=800;o.connect(g);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.5,t+.01);
+    g.gain.exponentialRampToValueAtTime(.0008,t+.16);o.start(t);o.stop(t+.18);
+  }else{
+    const o=AC.createOscillator();o.type='sawtooth';
+    o.frequency.setValueAtTime(400,t);o.frequency.exponentialRampToValueAtTime(2000,t+.16);
+    const f=AC.createBiquadFilter();f.type='lowpass';f.frequency.value=4000;
+    o.connect(f);f.connect(g);
+    g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.4,t+.01);
+    g.gain.exponentialRampToValueAtTime(.0008,t+.18);o.start(t);o.stop(t+.2);
+  }
+}
+function startBeacon(type,rate){audio();if(AC.state==='suspended')AC.resume();
+  stopBeacon();S.playing=true;burst(type,S.clamped);
+  timer=setInterval(()=>burst(type,S.clamped),1000/rate);}
+function stopBeacon(){if(timer){clearInterval(timer);timer=null}S.playing=false}
+
+const cfg={headSrc:'key',cond:'dynamic',clamp:'off',ef:'off'};
+function sw(el,key,cb){el.querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  el.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+  b.classList.add('on');cfg[key]=b.dataset.v;if(cb)cb(b.dataset.v);drawDial();});}
+sw($('hsSw'),'headSrc',v=>{$('phoneBox').style.display=v==='phone'?'block':'none';
+  $('hsP').textContent=v==='phone'?'phone':'keyboard';});
+sw($('condSw'),'cond',v=>$('condNote').textContent=v==='dynamic'
+  ?'Beacon keeps playing while you turn.'
+  :'Two seconds from one fixed head position, then silence. Then point.');
+sw($('clampSw'),'clamp');
+sw($('efSw'),'ef',v=>{$('efP').textContent=v;$('efP').className='pill '+(v==='on'?'ok':'');});
+$('rate').oninput=e=>{$('rateV').textContent=(+e.target.value).toFixed(1)+' /s';
+  if(S.playing&&trialOn&&cfg.cond==='dynamic')startBeacon($('btype').value,+e.target.value);};
+$('dist').oninput=e=>$('distV').textContent=(+e.target.value).toFixed(1)+' m';
+$('dwell').oninput=e=>$('dwellV').textContent=(+e.target.value).toFixed(1)+' s';
+
+let refHeading=null,probeAxis=null,lastMove=0;
+function eulerToR(a,b,g){
+  const c1=Math.cos(a),s1=Math.sin(a),c2=Math.cos(b),s2=Math.sin(b),
+        c3=Math.cos(g),s3=Math.sin(g);
+  return [c1*c3-s1*s2*s3, -c2*s1, c1*s3+c3*s1*s2,
+          c3*s1+c1*s2*s3,  c1*c2, s1*s3-c1*c3*s2,
+          -c2*s3,          s2,    c2*c3];
+}
+const mul=(R,v)=>[R[0]*v[0]+R[1]*v[1]+R[2]*v[2],
+                  R[3]*v[0]+R[4]*v[1]+R[5]*v[2],
+                  R[6]*v[0]+R[7]*v[1]+R[8]*v[2]];
+let evCount=0,srcLocked=null,usingGyro=false,gyroLast=0;
+function applyYaw(y){
+  if(Math.abs(wrap(y-S.yaw))>rad(1.5))lastMove=performance.now();
+  S.yaw=y;
+  $('yawR').textContent=(deg(y)>=0?'+':'')+deg(y).toFixed(0)+'\u00B0';
+  if(trialOn&&cfg.cond==='dynamic')refreshAudio();else setListener(S.yaw);
+  drawDial();
+  if(trialOn&&cfg.ef==='on'&&cfg.headSrc==='phone')checkDwell();
+}
+function onMotion(e){
+  const r=e.rotationRate,a=e.accelerationIncludingGravity;
+  if(!r||r.alpha===null||!a||a.x===null)return;
+  if(!srcLocked){srcLocked='devicemotion';usingGyro=true;$('evR').textContent='devicemotion (gyro)';
+    $('axR').textContent='gyro';}
+  if(srcLocked!=='devicemotion')return;
+  evCount++;$('cntR').textContent=evCount;
+  $('rawR').textContent='ωz'+r.alpha.toFixed(0)+' g('+a.x.toFixed(1)+','+a.y.toFixed(1)+','+a.z.toFixed(1)+')';
+  const n=Math.hypot(a.x,a.y,a.z)||1;
+  const ux=a.x/n,uy=a.y/n,uz=a.z/n;              // device-frame up (from gravity)
+  const w=[rad(r.beta||0),rad(r.gamma||0),rad(r.alpha)];  // ω in device x,y,z
+  const yawRate=-(w[0]*ux+w[1]*uy+w[2]*uz);      // component about world vertical
+  const now=performance.now();
+  if(gyroLast)applyYaw(wrap(S.yaw+yawRate*(now-gyroLast)/1000));
+  gyroLast=now;
+}
+function onOrient(e){
+  if(srcLocked&&srcLocked!==e.type)return;
+  if(e.alpha===null||e.alpha===undefined){
+    $('rawR').textContent='alpha is null on '+e.type;return;}
+  if(!srcLocked){srcLocked=e.type;$('evR').textContent=e.type;}
+  evCount++;$('cntR').textContent=evCount;
+  $('rawR').textContent='a'+e.alpha.toFixed(0)+' b'+(e.beta||0).toFixed(0)+
+                        ' g'+(e.gamma||0).toFixed(0);
+  const R=eulerToR(rad(e.alpha),rad(e.beta||0),rad(e.gamma||0));
+  if(!probeAxis){
+    const cand=[[1,0,0],[0,1,0],[0,0,1]];let best=cand[1],bz=2;
+    for(const a of cand){const w=mul(R,a);if(Math.abs(w[2])<bz){bz=Math.abs(w[2]);best=a;}}
+    probeAxis=best;$('axR').textContent=['X','Y','Z'][probeAxis.indexOf(1)];
+  }
+  const w=mul(R,probeAxis);
+  const heading=Math.atan2(w[0],w[1]);
+  if(refHeading===null)refHeading=heading;
+  applyYaw(wrap(heading-refHeading));
+}
+function ctxProblems(){
+  const p=[];
+  if(!window.isSecureContext)p.push('This page is <b>not a secure context</b>. Sensors are '+
+    'blocked on plain http. Host it over https, or use http://localhost.');
+  if(window.self!==window.top)p.push('This page is running <b>inside an iframe</b> '+
+    '(an artifact preview or embed). Iframes block motion sensors. Open the hosted URL '+
+    'directly in a browser tab.');
+  if(typeof DeviceOrientationEvent==='undefined')p.push('This browser exposes no '+
+    '<code>DeviceOrientationEvent</code> at all — you are probably on a desktop machine.');
+  return p;
+}
+function attachGyro(){
+  if(typeof DeviceMotionEvent!=='undefined'&&DeviceMotionEvent.requestPermission){
+    DeviceMotionEvent.requestPermission().then(r=>{
+      if(r==='granted')window.addEventListener('devicemotion',onMotion,true);});
+  } else window.addEventListener('devicemotion',onMotion,true);
+}
+$('gyroBtn').onclick=()=>{srcLocked=null;usingGyro=false;gyroLast=0;evCount=0;
+  attachGyro();$('sensMsg').innerHTML='Gyro fallback attached. Rotate and watch the event '+
+  'counter. Gyro drifts, so re-zero every few trials.';};
+$('sensOn').onclick=async()=>{
+  audio();if(AC.state==='suspended')AC.resume();
+  const probs=ctxProblems();
+  if(probs.length){
+    $('sensMsg').innerHTML='<span style="color:var(--bad)">Sensors will not fire here.</span><br>'+
+      probs.join('<br>');
+    return;
+  }
+  try{
+    if(DeviceOrientationEvent.requestPermission){
+      const r=await DeviceOrientationEvent.requestPermission();
+      if(r!=='granted'){$('sensMsg').innerHTML='<span style="color:var(--bad)">Permission '+
+        'denied.</span> Reload and tap Enable motion again — iOS only asks once per gesture.';
+        return;}
+    }
+    // listen to BOTH; whichever actually delivers data wins
+    window.addEventListener('deviceorientationabsolute',onOrient,true);
+    window.addEventListener('deviceorientation',onOrient,true);
+    $('hsP').textContent='phone';$('hsP').className='pill ok';
+    $('sensMsg').innerHTML='Listening. Rotate the phone — the event counter should climb.';
+    try{await navigator.wakeLock.request('screen')}catch(err){}
+    setTimeout(()=>{
+      if(evCount===0){
+        $('sensMsg').innerHTML='<span style="color:var(--warn)">No orientation events in '+
+          '2 s.</span> Trying the gyro fallback, which needs no magnetometer…';
+        attachGyro();
+        setTimeout(()=>{if(evCount===0)$('sensMsg').innerHTML=
+          '<span style="color:var(--bad)">Still nothing.</span> Check that you are on the '+
+          'phone (not the laptop), on an https URL, in a normal browser tab rather than an '+
+          'embed, and that motion access is not disabled in site settings.';},2000);
+      }
+    },2000);
+  }catch(err){
+    $('sensMsg').innerHTML='<span style="color:var(--bad)">'+err.name+': '+err.message+'</span>';
+  }
+};
+$('zero').onclick=()=>{refHeading=null;probeAxis=null;gyroLast=0;S.yaw=0;
+  drawDial();say('Zeroed.');};
+
+function say(t){try{speechSynthesis.cancel();
+  const u=new SpeechSynthesisUtterance(t);u.rate=1.1;speechSynthesis.speak(u);}catch(e){}}
+
+let trials=[],trialOn=false,tStart=0,locked=null,blockRunning=false;
+const BASE=[[33,17,7.5],[-124,-65,3.3],[52,73,5.6],[4,0,2.7],[-41,-63,4.1],[99,73,5.8],
+[-137,-73,4.1],[146,30,3.7],[66,75,4.1],[70,70,2.9],[-106,-57,5.7],[132,81,4.1],[-38,-58,9.0],
+[-38,-44,2.8],[-5,-7,5.9],[-80,-96,3.8],[-92,-10,5.1],[72,80,2.9],[-156,-89,14.9],[-6,0,4.8],
+[-95,-7,18.4],[-15,0,2.4],[71,64,6.7],[-111,-92,5.2],[98,87,2.4],[-78,-88,2.3],[-74,-78,2.3],
+[-144,-103,3.4],[83,88,2.3],[63,82,3.2],[81,68,2.8],[-121,-84,2.9],[174,-177,4.7],[82,88,3.3],
+[-17,-21,2.6],[170,-1,3.3]];
+BASE.forEach((t,i)=>{
+  const tb=rad(t[0]),ab=rad(t[1]),err=wrap(ab-tb),ae=Math.abs(deg(err));
+  const mt=wrap(Math.PI-tb),am=Math.abs(deg(wrap(ab-mt)));
+  trials.push({n:i+1,cond:'dynamic',clamp:'off',src:'key',trueDeg:t[0],ansDeg:t[1],
+    errDeg:deg(err),abs:ae,
+    fb:Math.sign(Math.cos(tb))!==Math.sign(Math.cos(ab))&&am<ae,
+    secs:t[2],rear:Math.abs(t[0])>90,base:true});
+});
+
+const dial=$('dial'),dx=dial.getContext('2d');
+function drawDial(){
+  const w=dial.width,h=dial.height,cx=w/2,cy=h/2,R=Math.min(w,h)/2-34;
+  dx.clearRect(0,0,w,h);
+  if(cfg.clamp==='on'){
+    dx.fillStyle='#171d26';dx.beginPath();dx.moveTo(cx,cy);
+    dx.arc(cx,cy,R,CLAMP-Math.PI/2,-CLAMP-Math.PI/2+2*Math.PI);dx.closePath();dx.fill();
+  }
+  dx.strokeStyle='#243040';dx.lineWidth=1;
+  [R,R*.66,R*.33].forEach(r=>{dx.beginPath();dx.arc(cx,cy,r,0,7);dx.stroke()});
+  dx.strokeStyle='#1d2632';
+  for(let a=0;a<360;a+=15){const t=rad(a);dx.beginPath();
+    dx.moveTo(cx+Math.sin(t)*R*.9,cy-Math.cos(t)*R*.9);
+    dx.lineTo(cx+Math.sin(t)*R,cy-Math.cos(t)*R);dx.stroke();}
+  dx.fillStyle='#63707f';dx.font='11px ui-monospace,monospace';dx.textAlign='center';
+  [['FRONT',0],['RIGHT',90],['BACK',180],['LEFT',270]].forEach(v=>{const t=rad(v[1]);
+    dx.fillText(v[0],cx+Math.sin(t)*(R+20),cy-Math.cos(t)*(R+20)+4)});
+  dx.save();dx.translate(cx,cy);dx.rotate(S.yaw);
+  dx.fillStyle='#4da3ff';dx.beginPath();dx.arc(0,0,16,0,7);dx.fill();
+  dx.strokeStyle='#4da3ff';dx.lineWidth=3;dx.beginPath();dx.moveTo(0,-14);dx.lineTo(0,-R*.86);dx.stroke();
+  dx.beginPath();dx.moveTo(-7,-R*.86+11);dx.lineTo(0,-R*.86);dx.lineTo(7,-R*.86+11);dx.stroke();
+  dx.restore();
+  if(!trialOn&&locked!==null){
+    const t=S.bearing,r=R*.7;
+    dx.fillStyle='#3fcf8e';dx.beginPath();dx.arc(cx+Math.sin(t)*r,cy-Math.cos(t)*r,9,0,7);dx.fill();
+    dx.strokeStyle='#3fcf8e';dx.lineWidth=1;dx.setLineDash([4,4]);dx.beginPath();
+    dx.moveTo(cx,cy);dx.lineTo(cx+Math.sin(t)*r,cy-Math.cos(t)*r);dx.stroke();dx.setLineDash([]);
+  }
+  if(S.clamped){dx.fillStyle='#f0b429';dx.textAlign='right';dx.fillText('CLAMPED',w-12,20);}
+  dx.fillStyle='#8b98a8';dx.textAlign='left';
+  dx.fillText('head '+(deg(S.yaw)>=0?'+':'')+deg(S.yaw).toFixed(0)+'\u00B0',12,20);
+}
+function refreshAudio(){
+  const rel=wrap(S.bearing-S.yaw);
+  const r=applyClamp(rel);S.clamped=r.c;
+  setListener(S.yaw);setListenerPos(0,0);
+  const p=worldPos(wrap(S.yaw+r.b),S.dist);setSource(p.x,p.z);
+}
+function checkDwell(){
+  if(performance.now()-lastMove>+$('dwell').value*1000)submit();
+}
+function newTrial(){
+  audio();
+  S.bearing=Math.random()*2*Math.PI-Math.PI;S.dist=+$('dist').value;
+  if(cfg.headSrc!=='phone')S.yaw=0;
+  locked=null;trialOn=true;tStart=performance.now();lastMove=performance.now();
+  refreshAudio();drawDial();
+  $('stateP').textContent=cfg.cond==='dynamic'?'turn to face it':'listening (2 s)';
+  $('stateP').className='pill ok';
+  $('startT').disabled=true;$('answer').disabled=false;
+  startBeacon($('btype').value,+$('rate').value);
+  if(cfg.ef==='on')say('Trial '+(trials.filter(t=>!t.base).length+1));
+  if(cfg.cond==='static')setTimeout(()=>{if(trialOn){stopBeacon();
+    $('stateP').textContent='silent — point at it';$('stateP').className='pill wa';
+    lastMove=performance.now();}},2000);
+}
+function submit(){
+  if(!trialOn)return;
+  trialOn=false;stopBeacon();locked=S.yaw;
+  const err=wrap(S.yaw-S.bearing),ae=Math.abs(deg(err));
+  const mt=wrap(Math.PI-S.bearing),am=Math.abs(deg(wrap(S.yaw-mt)));
+  const fb=Math.sign(Math.cos(S.bearing))!==Math.sign(Math.cos(S.yaw))&&am<ae;
+  trials.push({n:trials.length+1,cond:cfg.cond,clamp:cfg.clamp,src:cfg.headSrc,
+    trueDeg:deg(S.bearing),ansDeg:deg(S.yaw),errDeg:deg(err),abs:ae,fb,
+    secs:(performance.now()-tStart)/1000,rear:Math.abs(deg(S.bearing))>90,base:false});
+  $('stateP').textContent=ae.toFixed(0)+'\u00B0'+(fb?' · reversal':'');
+  $('stateP').className='pill '+(fb?'no':ae<20?'ok':'wa');
+  $('startT').disabled=false;$('answer').disabled=true;
+  drawDial();render();
+  if(cfg.ef==='on'){
+    say(Math.round(ae)+' degrees'+(fb?', reversal':''));
+    if(blockRunning)setTimeout(()=>{if(blockRunning&&!trialOn)newTrial()},2600);
+  }
+}
+$('startT').onclick=()=>{blockRunning=(cfg.ef==='on');newTrial()};
+$('answer').onclick=submit;
+$('abort').onclick=()=>{blockRunning=false;trialOn=false;stopBeacon();
+  $('startT').disabled=false;$('answer').disabled=true;
+  $('stateP').textContent='stopped';$('stateP').className='pill';};
+$('clr').onclick=()=>{trials=trials.filter(t=>t.base);render()};
+$('csv').onclick=()=>{
+  const h='n,condition,clamp,head_source,true_deg,answer_deg,error_deg,abs_error_deg,'+
+          'front_back_reversal,rear_source,seconds,baseline';
+  const b=trials.map(t=>[t.n,t.cond,t.clamp,t.src,t.trueDeg.toFixed(1),t.ansDeg.toFixed(1),
+    t.errDeg.toFixed(1),t.abs.toFixed(1),t.fb,t.rear,t.secs.toFixed(1),t.base].join(',')).join('\n');
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([h+'\n'+b],{type:'text/csv'}));
+  a.download='localisation-trials.csv';a.click();
+};
+function turn(d){if(!trialOn&&locked!==null)return;S.yaw=wrap(S.yaw+d);
+  if(trialOn&&cfg.cond==='dynamic')refreshAudio();else setListener(S.yaw);drawDial();}
+addEventListener('keydown',e=>{
+  if(CUR==='B')return;
+  const st=e.shiftKey?rad(15):rad(3);
+  if(e.key==='ArrowLeft'){turn(-st);e.preventDefault()}
+  if(e.key==='ArrowRight'){turn(st);e.preventDefault()}
+  if(e.key==='Enter'){trialOn?submit():newTrial();e.preventDefault()}
+});
+let dragD=false;
+dial.addEventListener('pointerdown',e=>{dragD=true;dial.setPointerCapture(e.pointerId);dm(e)});
+dial.addEventListener('pointermove',e=>{if(dragD)dm(e)});
+dial.addEventListener('pointerup',()=>dragD=false);
+function dm(e){
+  if(cfg.headSrc==='phone')return;
+  const r=dial.getBoundingClientRect();
+  const x=(e.clientX-r.left)*(dial.width/r.width)-dial.width/2;
+  const y=(e.clientY-r.top)*(dial.height/r.height)-dial.height/2;
+  if(!trialOn&&locked!==null)return;
+  S.yaw=wrap(Math.atan2(x,-y));
+  if(trialOn&&cfg.cond==='dynamic')refreshAudio();else setListener(S.yaw);drawDial();}
+
+const plot=$('plot'),px=plot.getContext('2d');
+function drawPlot(){
+  const w=plot.width,h=plot.height,L=48,B=36,T=14,Rp=14;
+  px.clearRect(0,0,w,h);
+  const X=d=>L+((d+180)/360)*(w-L-Rp);
+  const Y=e=>h-B-(Math.min(e,180)/180)*(h-B-T);
+  px.fillStyle='#141a22';
+  px.fillRect(X(-180),T,X(-90)-X(-180),h-B-T);
+  px.fillRect(X(90),T,X(180)-X(90),h-B-T);
+  px.font='11px ui-monospace,monospace';px.fillStyle='#4a5666';px.textAlign='center';
+  px.fillText('rear',(X(-180)+X(-90))/2,T+16);
+  px.fillText('rear',(X(90)+X(180))/2,T+16);
+  px.fillText('frontal hemisphere',(X(-90)+X(90))/2,T+16);
+  px.strokeStyle='#243040';px.lineWidth=1;
+  [0,45,90,135,180].forEach(e=>{px.beginPath();px.moveTo(L,Y(e));px.lineTo(w-Rp,Y(e));px.stroke();
+    px.fillStyle='#63707f';px.textAlign='right';px.fillText(e+'\u00B0',L-6,Y(e)+4)});
+  [-180,-90,0,90,180].forEach(d=>{px.beginPath();px.moveTo(X(d),T);px.lineTo(X(d),h-B);px.stroke();
+    px.fillStyle='#63707f';px.textAlign='center';px.fillText(d+'\u00B0',X(d),h-B+16)});
+  px.strokeStyle='#3fcf8e';px.setLineDash([5,5]);px.beginPath();
+  px.moveTo(L,Y(20));px.lineTo(w-Rp,Y(20));px.stroke();px.setLineDash([]);
+  px.fillStyle='#3fcf8e';px.textAlign='left';px.fillText('20\u00B0 gate',L+6,Y(20)-6);
+  trials.forEach(t=>{
+    px.fillStyle=t.fb?'#f0654a':(t.clamp==='on'?'#f0b429':'#4da3ff');
+    px.globalAlpha=t.base?.7:1;
+    px.beginPath();px.arc(X(t.trueDeg),Y(t.abs),t.base?4.5:6,0,7);px.fill();
+    if(!t.base){px.globalAlpha=1;px.strokeStyle='#e6edf5';px.lineWidth=1.2;px.stroke();}
+    px.globalAlpha=1;
+  });
+  px.fillStyle='#8b98a8';px.textAlign='left';
+  px.fillText('blue ok   red reversal   amber clamped   ringed = new trials',L,h-6);
+}
+function cellStats(f){const s=trials.filter(f);
+  return s.length?{n:s.length,m:med(s.map(t=>t.abs)),
+    r:Math.round(100*s.filter(t=>t.fb).length/s.length)}:null;}
+function render(){
+  const rows=[];
+  const push=(name,f)=>{const c=cellStats(f);
+    if(c)rows.push([name,c.n,c.m.toFixed(0)+'\u00B0',c.r+'%'])};
+  push('ALL',()=>true);
+  push('· front source',t=>!t.rear);
+  push('· rear source',t=>t.rear);
+  push('dynamic',t=>t.cond==='dynamic');
+  push('static',t=>t.cond==='static');
+  push('clamp off',t=>t.clamp==='off');
+  push('clamp on',t=>t.clamp==='on');
+  push('· clamp on, rear',t=>t.clamp==='on'&&t.rear);
+  push('head: keyboard',t=>t.src==='key');
+  push('head: phone',t=>t.src==='phone');
+  push('· phone, rear',t=>t.src==='phone'&&t.rear);
+  $('brk').innerHTML=rows.map(r=>'<tr><td>'+r[0]+'</td><td>'+r[1]+
+    '</td><td style="color:'+(parseInt(r[2])<20?'#3fcf8e':parseInt(r[2])<45?'#f0b429':'#f0654a')+
+    '">'+r[2]+'</td><td>'+r[3]+'</td></tr>').join('');
+  const nb=trials.filter(t=>!t.base);
+  $('sN').textContent=nb.length;
+  $('sMed').textContent=nb.length?med(nb.map(t=>t.abs)).toFixed(0)+'\u00B0':'—';
+  $('sFB').textContent=nb.length?Math.round(100*nb.filter(t=>t.fb).length/nb.length)+'%':'—';
+  $('sLat').textContent=nb.length?med(nb.map(t=>t.secs)).toFixed(1):'—';
+  $('log').innerHTML=trials.slice().reverse().slice(0,140).map(t=>
+    '<tr style="opacity:'+(t.base?.55:1)+'"><td>'+t.n+'</td><td>'+t.cond.slice(0,3)+
+    '</td><td>'+t.clamp+'</td><td>'+t.src+'</td><td>'+t.trueDeg.toFixed(0)+
+    '</td><td>'+t.ansDeg.toFixed(0)+'</td><td style="color:'+
+    (t.abs<20?'#3fcf8e':t.abs<45?'#f0b429':'#f0654a')+'">'+t.abs.toFixed(0)+
+    '</td><td>'+(t.fb?'<span style="color:#f0654a">yes</span>':'')+
+    '</td><td>'+t.secs.toFixed(1)+'</td></tr>').join('');
+  drawPlot();
+}
+
+let CUR='A';
+const TT={A:[$('tabA'),$('secA')],B:[$('tabB'),$('secB')],C:[$('tabC'),$('secC')]};
+function show(k){for(const j in TT){TT[j][0].classList.toggle('on',j===k);
+  TT[j][1].classList.toggle('on',j===k)}CUR=k;if(k==='C')render();}
+$('tabA').onclick=()=>show('A');$('tabB').onclick=()=>show('B');$('tabC').onclick=()=>show('C');
+
+const memory=[],L2={x:0,z:0,yaw:0};let pend=null,target=null;
+const map=$('map'),mx=map.getContext('2d'),ovc=$('ov'),oc=ovc.getContext('2d');
+$('fov').oninput=e=>$('fovV').textContent=e.target.value+'\u00B0';
+$('od').oninput=e=>$('odV').textContent=(+e.target.value).toFixed(1)+' m';
+$('camOn').onclick=async()=>{try{
+  const s=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}});
+  $('vid').srcObject=s;await $('vid').play();
+  $('camP').textContent='live';$('camP').className='pill ok';$('camOn').disabled=true;ovLoop();
+}catch(err){$('camP').textContent='blocked';$('camP').className='pill no';
+  $('camMsg').innerHTML='<span style="color:var(--bad)">'+err.name+
+  '</span> — needs a secure origin (https or localhost).';}};
+function ovLoop(){oc.clearRect(0,0,ovc.width,ovc.height);
+  if(pend!==null){const p=(pend/rad(+$('fov').value)+.5)*ovc.width;
+    oc.strokeStyle='#4da3ff';oc.lineWidth=2;oc.beginPath();oc.moveTo(p,0);oc.lineTo(p,ovc.height);
+    oc.stroke();oc.fillStyle='#4da3ff';oc.font='12px ui-monospace,monospace';
+    oc.fillText(deg(pend).toFixed(0)+'\u00B0',p+6,18);}
+  requestAnimationFrame(ovLoop);}
+ovc.addEventListener('click',e=>{const r=ovc.getBoundingClientRect();
+  pend=((e.clientX-r.left)/r.width-.5)*rad(+$('fov').value);$('commit').disabled=false;});
+$('commit').onclick=()=>{if(pend===null)return;const p=worldPos(pend,+$('od').value);
+  memory.push({label:$('lbl').value.trim()||'object',support:$('sup').value.trim()||'surface',
+    x:p.x,z:p.z});pend=null;$('commit').disabled=true;drawMem();drawMap();};
+$('wipe').onclick=()=>{memory.length=0;drawMem();drawMap()};
+function drawMem(){$('mem').innerHTML=memory.length?memory.map(m=>
+  '<tr><td>'+m.label+'</td><td>'+m.support+'</td><td>'+m.x.toFixed(2)+'</td><td>'+
+  m.z.toFixed(2)+'</td></tr>').join(''):
+  '<tr><td colspan="4" style="color:#5c6675">empty</td></tr>';}
+function drawMap(){const w=map.width,h=map.height,cx=w/2,cy=h-56,P=52;
+  mx.clearRect(0,0,w,h);mx.strokeStyle='#1d2632';mx.lineWidth=1;
+  for(let i=-5;i<=5;i++){mx.beginPath();mx.moveTo(cx+i*P,0);mx.lineTo(cx+i*P,h);mx.stroke();
+    mx.beginPath();mx.moveTo(0,cy+i*P);mx.lineTo(w,cy+i*P);mx.stroke();}
+  mx.font='11px ui-monospace,monospace';
+  mx.fillStyle='#63707f';mx.beginPath();mx.arc(cx,cy,7,0,7);mx.fill();
+  mx.fillText('camera',cx+11,cy+4);
+  memory.forEach(m=>{const a=cx+m.x*P,b=cy+m.z*P;
+    mx.fillStyle='#3fcf8e';mx.beginPath();mx.arc(a,b,6,0,7);mx.fill();
+    mx.fillStyle='#8fe8c0';mx.fillText(m.label,a+9,b+4)});
+  const lx=cx+L2.x*P,ly=cy+L2.z*P;
+  mx.save();mx.translate(lx,ly);mx.rotate(L2.yaw);
+  mx.fillStyle='#4da3ff';mx.beginPath();mx.arc(0,0,10,0,7);mx.fill();
+  mx.strokeStyle='#4da3ff';mx.lineWidth=3;mx.beginPath();mx.moveTo(0,-9);mx.lineTo(0,-32);mx.stroke();
+  mx.beginPath();mx.moveTo(-6,-24);mx.lineTo(0,-32);mx.lineTo(6,-24);mx.stroke();mx.restore();
+  mx.fillStyle='#8b98a8';mx.fillText('you · '+deg(L2.yaw).toFixed(0)+'\u00B0',12,20);
+  mx.fillText('1 square = 1 m',12,h-12);}
+let dragM=false;
+map.addEventListener('pointerdown',e=>{dragM=true;map.setPointerCapture(e.pointerId);mm(e)});
+map.addEventListener('pointermove',e=>{if(dragM)mm(e)});
+map.addEventListener('pointerup',()=>dragM=false);
+function mm(e){const r=map.getBoundingClientRect(),P=52,cx=map.width/2,cy=map.height-56;
+  L2.x=((e.clientX-r.left)*(map.width/r.width)-cx)/P;
+  L2.z=((e.clientY-r.top)*(map.height/r.height)-cy)/P;drawMap();updB();}
+addEventListener('keydown',e=>{
+  if(CUR!=='B')return;
+  const st=e.shiftKey?rad(15):rad(5);
+  if(e.key==='ArrowLeft'){L2.yaw=wrap(L2.yaw-st);drawMap();updB();e.preventDefault()}
+  if(e.key==='ArrowRight'){L2.yaw=wrap(L2.yaw+st);drawMap();updB();e.preventDefault()}
+});
+function updB(){if(!target||!AC)return;
+  const ax=target.x-L2.x,az=target.z-L2.z;
+  const rel=wrap(Math.atan2(ax,-az)-L2.yaw);
+  const r=applyClamp(rel);S.clamped=r.c;
+  setListener(L2.yaw);setListenerPos(L2.x,L2.z);
+  const p=worldPos(wrap(L2.yaw+r.b),Math.hypot(ax,az));
+  setSource(L2.x+p.x,L2.z+p.z);}
+const clock=b=>{let h=Math.round(deg(wrap(b))/30);if(h<=0)h+=12;return h+" o'clock"};
+$('ask').onclick=()=>{
+  const q=$('q').value.toLowerCase().trim(),t0=performance.now();audio();
+  const rel=m=>{const a=m.x-L2.x,b=m.z-L2.z;
+    return{b:wrap(Math.atan2(a,-b)-L2.yaw),d:Math.hypot(a,b)}};
+  let sent='',found=null;
+  const sec=(lo,hi)=>memory.filter(m=>{const a=deg(rel(m).b);
+    return hi===999?Math.abs(a)>135:(a>=lo&&a<=hi)});
+  if(/left/.test(q)){const s=sec(-135,-25);found=s[0];
+    sent=s.length?'On your left: '+s.map(m=>m.label+' at '+rel(m).d.toFixed(1)+' metres').join(', ')
+      :'Nothing recorded on your left.';}
+  else if(/right/.test(q)){const s=sec(25,135);found=s[0];
+    sent=s.length?'On your right: '+s.map(m=>m.label+' at '+rel(m).d.toFixed(1)+' metres').join(', ')
+      :'Nothing recorded on your right.';}
+  else if(/front|ahead/.test(q)){const s=sec(-25,25);found=s[0];
+    sent=s.length?'Ahead of you: '+s.map(m=>m.label+' at '+rel(m).d.toFixed(1)+' metres').join(', ')
+      :'Nothing recorded directly ahead.';}
+  else if(/behind|back/.test(q)){const s=sec(0,999);found=s[0];
+    sent=s.length?'Behind you: '+s.map(m=>m.label).join(', ')+'. Turn around.'
+      :'Nothing recorded behind you.';}
+  else if(/around|near me/.test(q)){found=memory[0];
+    sent=memory.length?memory.map(m=>{const r=rel(m);
+      return m.label+' at '+clock(r.b)+', '+r.d.toFixed(1)+' metres'}).join('; ')
+      :'Memory is empty for this room.';}
+  else{const wds=q.replace(/where('s| is| are)?|my|the|\?/g,'').trim().split(/\s+/).filter(Boolean);
+    found=memory.find(m=>wds.some(w=>w&&m.label.indexOf(w)>=0));
+    if(found){const r=rel(found),behind=Math.abs(deg(r.b))>90;
+      sent='Your '+found.label+' are on the '+found.support+', '+
+        (behind?'behind you — turn '+(r.b>0?'right':'left')+'. ':'')+
+        clock(r.b)+', about '+r.d.toFixed(1)+' metres.';}
+    else sent=wds.length?"I don't have "+wds.join(' ')+' in memory for this room.'
+      :'Ask me where something is.';}
+  if(found){target=found;updB();startBeacon('click',2.5);}
+  const ms=performance.now()-t0;
+  $('ans').textContent=sent;setTimeout(()=>say(sent),120);
+  $('lat').innerHTML='beacon at <b>'+ms.toFixed(0)+' ms</b>, speech at ~120 ms'+
+    (S.clamped?' · <span style="color:var(--warn)">clamped to frontal edge</span>':'');
+};
+$('stopB').onclick=()=>{stopBeacon();target=null};
+$('q').addEventListener('keydown',e=>{if(e.key==='Enter')$('ask').click()});
+
+drawDial();drawMem();drawMap();render();
+</script>

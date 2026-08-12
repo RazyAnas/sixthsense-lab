@@ -228,6 +228,16 @@
 </section>
 
 <section class="tab" id="secB">
+  <div class="card" style="margin-bottom:14px">
+    <h2>Status</h2>
+    <div class="stats">
+      <div><div class="stat" id="stSec">&mdash;</div><div class="statlbl">secure ctx</div></div>
+      <div><div class="stat" id="stSen">&mdash;</div><div class="statlbl">head sensor</div></div>
+      <div><div class="stat" id="stTrk">&mdash;</div><div class="statlbl">tracking</div></div>
+      <div><div class="stat" id="stObj">0</div><div class="statlbl">objects</div></div>
+    </div>
+    <p class="note" id="stMsg" style="margin-top:10px"></p>
+  </div>
   <div class="banner">
     Camera needs a secure origin. Over a hosted https link it works on the phone too.
     From <code>file://</code> Chrome refuses it.
@@ -280,6 +290,7 @@
           <div><div class="stat" id="lookB">&mdash;</div><div class="statlbl">bearing</div></div>
         </div>
         <button class="act big" id="remember" style="margin-top:12px">Remember this</button>
+        <p class="note" id="lookMsg" style="margin-top:8px;min-height:18px"></p>
       </div>
 
       <div class="card">
@@ -852,6 +863,26 @@ $('sup').addEventListener('input',()=>{
   $('surfH').value=g;$('surfHV').textContent=g.toFixed(2)+' m';
   $('surfAuto').textContent='auto';
 });
+function statusLoop(){
+  const set=(id,ok,txt)=>{const e=$(id);e.textContent=txt;
+    e.style.color=ok?'var(--ok,#3ddc84)':'#ff6b6b'};
+  set('stSec',window.isSecureContext,window.isSecureContext?'yes':'NO');
+  set('stSen',pitchOK,pitchOK?'live':'off');
+  set('stTrk',xrOn,xrOn?'6-DoF':'off');
+  $('stObj').textContent=memory.length;
+  let m='';
+  if(!window.isSecureContext)
+    m='Not a secure context — sensors, camera and AR are all blocked. '+
+      'Open this over https or through a tunnel, not plain http.';
+  else if(!xrOn&&!pitchOK)
+    m='No head tracking yet. Tap Start tracking above.';
+  else if(!memory.length)
+    m='Nothing remembered yet. Look at an object and tap Remember this.';
+  else m='Ready. Ask where something is.';
+  $('stMsg').textContent=m;
+  requestAnimationFrame(statusLoop);
+}
+statusLoop();
 function lookLoop(){
   const d=lookDist();
   $('lookD').textContent=d?d.toFixed(1)+' m':'—';
@@ -860,10 +891,22 @@ function lookLoop(){
   if(!pitchOK){p.textContent='needs sensor';p.className='pill no'}
   else if(!d){p.textContent='look further down';p.className='pill'}
   else {p.textContent='ready';p.className='pill ok'}
-  $('remember').disabled=!d;
   requestAnimationFrame(lookLoop);
 }
+// Why can't I capture right now? One place, so the button can always answer.
+function lookBlocker(){
+  if(!pitchOK)return 'No head sensor yet. Start tracking, or turn on Phone sensor in the Lab tab.';
+  const drop=(+$('camH').value)-(+$('surfH').value);
+  if(drop<0.15)return 'Surface height is too close to camera height. Lower it.';
+  if(-S.pitch<rad(4))return 'Look further down at the object.';
+  const d=drop/Math.tan(-S.pitch);
+  if(d<0.4)return 'Too close — that reads under half a metre.';
+  if(d>8)return 'Too far, or you are looking too level. That reads over eight metres.';
+  return null;
+}
 $('remember').onclick=()=>{
+  const why=lookBlocker();
+  if(why){$('lookMsg').textContent=why;say(why);return}
   const d=lookDist();if(!d)return;
   // Object sits straight ahead of the head, so its bearing is the head's yaw.
   const p=worldPos(L2.yaw,d);
@@ -871,6 +914,7 @@ $('remember').onclick=()=>{
     support:$('sup').value.trim()||'surface',x:L2.x+p.x,z:L2.z+p.z,
     seen:Date.now()});
   drawMem();drawMap();saveMem();
+  $('lookMsg').textContent='Saved '+($('lbl').value.trim()||'object')+' at '+d.toFixed(1)+' m.';
   say('Remembered '+($('lbl').value.trim()||'object')+' at '+d.toFixed(1)+' metres');
 };
 lookLoop();
@@ -914,6 +958,9 @@ $('xrOn').onclick=async()=>{
        domOverlay:{root:document.body}});
   }catch(e){$('xrMsg').textContent='Could not start: '+e.message;return}
   xrSpace=await xrSession.requestReferenceSpace('local-floor');
+  // In a DOM-overlay session a tap on the UI is otherwise consumed as an AR
+  // "select". Claiming it here is what keeps the buttons clickable.
+  document.body.addEventListener('beforexrselect',e=>e.preventDefault());
   xrOn=true;
   $('xrP').textContent='tracking';$('xrP').className='pill ok';
   $('xrOn').disabled=true;$('xrOff').disabled=false;
@@ -1035,3 +1082,77 @@ $('ask').onclick=()=>{
     sent=memory.length?memory.map(m=>{const r=rel(m);
       return m.label+' at '+clock(r.b)+', '+r.d.toFixed(1)+' metres'}).join('; ')
       :'Memory is empty for this room.';}
+  else{const wds=q.replace(/where('s| is| are)?|my|the|\?/g,'').trim().split(/\s+/).filter(Boolean);
+    found=memory.find(m=>wds.some(w=>w&&m.label.indexOf(w)>=0));
+    if(found){const r=rel(found),behind=Math.abs(deg(r.b))>90;
+      sent='Your '+found.label+' are on the '+found.support+', '+
+        (behind?'behind you — turn '+(r.b>0?'right':'left')+'. ':'')+
+        clock(r.b)+', about '+r.d.toFixed(1)+' metres.';}
+    else sent=wds.length?"I don't have "+wds.join(' ')+' in memory for this room.'
+      :'Ask me where something is.';}
+  if(found){target=found;updB();startBeacon('click',2.5);}
+  const ms=performance.now()-t0;
+  $('ans').textContent=sent;setTimeout(()=>say(sent),120);
+  $('lat').innerHTML='beacon at <b>'+ms.toFixed(0)+' ms</b>, speech at ~120 ms'+
+    (S.clamped?' · <span style="color:var(--warn)">clamped to frontal edge</span>':'');
+};
+$('stopB').onclick=()=>{stopBeacon();target=null};
+$('q').addEventListener('keydown',e=>{if(e.key==='Enter')$('ask').click()});
+
+/* ─── find test ─── */
+let runs=[],runMode='beacon',runT0=0,runTick=null;
+function fillTgt(){$('tgt').innerHTML=memory.map((m,i)=>
+  '<option value="'+i+'">'+m.label+'</option>').join('')||'<option>— place objects first —</option>';}
+const _dm=drawMem; drawMem=function(){_dm();fillTgt();};
+sw($('modeSw'),'runMode');
+function speakFor(m){
+  const ax=m.x-L2.x,az=m.z-L2.z;
+  const b=wrap(Math.atan2(ax,-az)-L2.yaw),d=Math.hypot(ax,az);
+  const behind=Math.abs(deg(b))>90;
+  return 'Your '+m.label+' are on the '+m.support+', '+
+    (behind?'behind you. ':'')+clock(b)+', about '+d.toFixed(1)+' metres.';
+}
+$('runBtn').onclick=()=>{
+  if(!memory.length)return;
+  audio();if(AC.state==='suspended')AC.resume();
+  const m=memory[+$('tgt').value||0];
+  const pick=cfg.runMode;
+  runMode = pick==='alt' ? (runs.length%2?'speech':'beacon') : pick;
+  target=m;clampSide=0;
+  $('ovlM').textContent=runMode==='beacon'?'beacon + speech':'speech only';
+  $('ovl').style.display='flex';
+  say(speakFor(m));
+  runT0=performance.now();
+  if(runMode==='beacon'){updB();startBeacon('click',2.5);}
+  runTick=setInterval(()=>{$('ovlT').textContent=((performance.now()-runT0)/1000).toFixed(1);},100);
+};
+$('ovl').onclick=()=>{
+  if(!runT0)return;
+  const secs=(performance.now()-runT0)/1000;runT0=0;
+  clearInterval(runTick);stopBeacon();target=null;
+  $('ovl').style.display='none';
+  runs.push({n:runs.length+1,mode:runMode,label:memory[+$('tgt').value||0].label,secs});
+  say(secs.toFixed(0)+' seconds');
+  renderRuns();
+};
+function renderRuns(){
+  const b=runs.filter(r=>r.mode==='beacon').map(r=>r.secs);
+  const sp=runs.filter(r=>r.mode==='speech').map(r=>r.secs);
+  $('rB').textContent=b.length?med(b).toFixed(1):'—';
+  $('rS').textContent=sp.length?med(sp).toFixed(1):'—';
+  $('rN').textContent=runs.length;
+  $('rD').textContent=(b.length&&sp.length)?
+    ((med(sp)-med(b))>=0?'-':'+')+Math.abs(med(sp)-med(b)).toFixed(1)+'s':'—';
+  $('runLog').innerHTML=runs.slice().reverse().map(r=>
+    '<tr><td>'+r.n+'</td><td>'+r.mode+'</td><td>'+r.label+'</td><td>'+
+    r.secs.toFixed(1)+'</td></tr>').join('');
+}
+$('runCsv').onclick=()=>{
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['n,mode,target,seconds\n'+
+    runs.map(r=>[r.n,r.mode,r.label,r.secs.toFixed(2)].join(',')).join('\n')],{type:'text/csv'}));
+  a.download='find-runs.csv';a.click();
+};
+
+drawDial();drawMem();drawMap();render();fillTgt();
+</script>

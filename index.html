@@ -354,6 +354,48 @@
 </section>
 </main>
 
+<style>
+#hud{display:none;position:fixed;inset:0;z-index:200;flex-direction:column;
+  gap:10px;padding:14px;box-sizing:border-box;overflow:hidden;touch-action:none;
+  font:16px system-ui;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,.9)}
+#hud .bar{display:flex;gap:8px;align-items:center;
+  background:rgba(10,14,20,.72);border-radius:12px;padding:10px 12px}
+#hud .bar b{font-family:ui-monospace,monospace;font-size:20px}
+#hud .chips{display:flex;gap:8px;flex-wrap:wrap}
+#hud .chips button{flex:1 1 28%;padding:14px 6px;font-size:16px;border-radius:12px;
+  border:1px solid rgba(255,255,255,.35);background:rgba(10,14,20,.6);color:#fff}
+#hud .chips button.on{background:#2b6cff;border-color:#2b6cff}
+#hud .big{flex:1;display:flex;flex-direction:column;gap:10px}
+#hud .big button{flex:1;font-size:30px;font-weight:800;border:none;border-radius:18px;
+  color:#fff;letter-spacing:.5px}
+#hudRem{background:#1c7f4b}#hudAsk{background:#2b6cff}
+#hudRem:active{background:#25a862}#hudAsk:active{background:#4d86ff}
+#hudStop{background:rgba(10,14,20,.72);border:1px solid rgba(255,255,255,.3);
+  color:#fff;padding:14px;font-size:17px;border-radius:14px}
+#hudSay{min-height:44px;background:rgba(10,14,20,.72);border-radius:12px;
+  padding:10px 12px;font-size:15px;line-height:1.35}
+</style>
+<div id="hud">
+  <div class="bar">
+    <span>dist</span><b id="hudD">—</b>
+    <span style="margin-left:auto">objects</span><b id="hudN">0</b>
+  </div>
+  <div class="chips" id="hudChips">
+    <button data-l="keys" data-s="table" class="on">keys</button>
+    <button data-l="phone" data-s="table">phone</button>
+    <button data-l="wallet" data-s="table">wallet</button>
+    <button data-l="bottle" data-s="floor">bottle</button>
+    <button data-l="bag" data-s="floor">bag</button>
+    <button data-l="remote" data-s="sofa">remote</button>
+  </div>
+  <div class="big">
+    <button id="hudRem">REMEMBER</button>
+    <button id="hudAsk">ASK</button>
+  </div>
+  <div id="hudSay">Pick a label, look at the object, tap REMEMBER.</div>
+  <button id="hudStop">Stop tracking</button>
+</div>
+
 <div id="ovl" style="display:none;position:fixed;inset:0;z-index:99;background:#0b2a1c;
   color:#e6edf5;align-items:center;justify-content:center;flex-direction:column;gap:18px;
   font-size:34px;font-weight:800;text-align:center;padding:24px">
@@ -952,21 +994,26 @@ $('xrOn').onclick=async()=>{
   if(!navigator.xr){$('xrMsg').textContent='WebXR not available here.';return}
   audio();if(AC.state==='suspended')AC.resume();          // unlock audio on the gesture
   try{
+    // The overlay root must be a compact, non-scrolling HUD. Handing it the
+    // whole page is what froze scrolling and clicks -- DOM overlay is not a
+    // viewport for an ordinary app UI.
     xrSession=await navigator.xr.requestSession('immersive-ar',
       {requiredFeatures:['local-floor'],
        optionalFeatures:['dom-overlay'],
-       domOverlay:{root:document.body}});
+       domOverlay:{root:$('hud')}});
   }catch(e){$('xrMsg').textContent='Could not start: '+e.message;return}
   xrSpace=await xrSession.requestReferenceSpace('local-floor');
   // In a DOM-overlay session a tap on the UI is otherwise consumed as an AR
   // "select". Claiming it here is what keeps the buttons clickable.
-  document.body.addEventListener('beforexrselect',e=>e.preventDefault());
+  $('hud').addEventListener('beforexrselect',e=>e.preventDefault());
   xrOn=true;
+  $('hud').style.display='flex';
   $('xrP').textContent='tracking';$('xrP').className='pill ok';
   $('xrOn').disabled=true;$('xrOff').disabled=false;
   $('xrMsg').textContent='Tracking live. Your position updates as you walk.';
   xrSession.addEventListener('end',()=>{
     xrOn=false;xrSession=null;
+    $('hud').style.display='none';
     $('xrP').textContent='off';$('xrP').className='pill';
     $('xrOn').disabled=false;$('xrOff').disabled=true;
     $('xrMsg').textContent='Tracking stopped. Back to fixed-spot mode.';
@@ -989,6 +1036,40 @@ $('xrOn').onclick=async()=>{
   });
 };
 $('xrOff').onclick=()=>{if(xrSession)xrSession.end()};
+
+// --- the HUD: the only UI that exists while the phone is on your head -------
+$('hudStop').onclick=()=>{if(xrSession)xrSession.end()};
+$('hudChips').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  $('hudChips').querySelectorAll('button').forEach(o=>o.classList.remove('on'));
+  b.classList.add('on');
+  $('lbl').value=b.dataset.l;
+  $('sup').value=b.dataset.s;
+  $('sup').dispatchEvent(new Event('input'));      // pulls the surface height across
+  $('hudSay').textContent='Label set to '+b.dataset.l+' on the '+b.dataset.s+'.';
+});
+$('hudRem').onclick=()=>{
+  const why=lookBlocker();
+  if(why){$('hudSay').textContent=why;say(why);return}
+  $('remember').click();
+  $('hudSay').textContent=$('lookMsg').textContent;
+};
+$('hudAsk').onclick=()=>{
+  if($('askVoice').disabled){$('hudSay').textContent='No speech input on this browser.';return}
+  $('askVoice').click();
+  $('hudSay').textContent='Listening…';
+};
+// Mirror the answer into the HUD so it is visible without leaving AR.
+const _say=say;
+say=function(t){_say(t);if(xrOn&&t)$('hudSay').textContent=t};
+function hudLoop(){
+  if(xrOn){
+    const d=lookDist();
+    $('hudD').textContent=d?d.toFixed(1)+' m':'—';
+    $('hudN').textContent=memory.length;
+  }
+  requestAnimationFrame(hudLoop);
+}
+hudLoop();
 
 // --- ask out loud: a blind user is not going to type ------------------------
 const SR=window.SpeechRecognition||window.webkitSpeechRecognition;

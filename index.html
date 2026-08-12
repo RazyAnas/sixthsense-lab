@@ -264,6 +264,30 @@
         <p class="note" id="ans" style="margin-top:10px;color:var(--ink);min-height:36px">—</p>
         <p class="note" id="lat"></p>
       </div>
+
+      <div class="card">
+        <h2>Find test <span class="pill" id="runP">ready</span></h2>
+        <label>Target object</label>
+        <select id="tgt"></select>
+        <label>Next run mode</label>
+        <div class="sw" id="modeSw">
+          <button data-v="alt" class="on">Alternate</button>
+          <button data-v="beacon">Beacon</button>
+          <button data-v="speech">Speech only</button>
+        </div>
+        <button class="act big" id="runBtn" style="margin-top:12px">Start run</button>
+        <div class="stats" style="margin-top:12px">
+          <div><div class="stat" id="rB">—</div><div class="statlbl">beacon med</div></div>
+          <div><div class="stat" id="rS">—</div><div class="statlbl">speech med</div></div>
+          <div><div class="stat" id="rN">0</div><div class="statlbl">runs</div></div>
+          <div><div class="stat" id="rD">—</div><div class="statlbl">delta</div></div>
+        </div>
+        <div class="scroll" style="max-height:150px;margin-top:10px">
+          <table><thead><tr><th>#</th><th>mode</th><th>target</th><th>s</th></tr></thead>
+          <tbody id="runLog"></tbody></table>
+        </div>
+        <button class="ghost" id="runCsv" style="margin-top:8px">Export runs CSV</button>
+      </div>
     </div>
     <div class="grid" style="align-content:start">
       <div class="card"><h2>Feed <span class="pill" id="camP">off</span></h2>
@@ -277,6 +301,14 @@
   </div>
 </section>
 </main>
+
+<div id="ovl" style="display:none;position:fixed;inset:0;z-index:99;background:#0b2a1c;
+  color:#e6edf5;align-items:center;justify-content:center;flex-direction:column;gap:18px;
+  font-size:34px;font-weight:800;text-align:center;padding:24px">
+  <div>TAP ANYWHERE<br>WHEN YOU TOUCH IT</div>
+  <div id="ovlT" style="font-family:ui-monospace,monospace;font-size:56px;opacity:.85">0.0</div>
+  <div id="ovlM" style="font-size:16px;font-weight:500;opacity:.7"></div>
+</div>
 
 <script>
 const wrap=a=>{while(a>Math.PI)a-=2*Math.PI;while(a<-Math.PI)a+=2*Math.PI;return a};
@@ -386,6 +418,7 @@ function applyYaw(y){
   if(Math.abs(wrap(y-S.yaw))>rad(1.5))lastMove=performance.now();
   S.yaw=y;
   $('yawR').textContent=(deg(y)>=0?'+':'')+deg(y).toFixed(0)+'\u00B0';
+  if(CUR==='B'){L2.yaw=S.yaw;drawMap();updB();return;}
   if(trialOn&&cfg.cond==='dynamic')refreshAudio();else setListener(S.yaw);
   drawDial();
   if(trialOn&&cfg.ef==='on'&&cfg.headSrc==='phone')checkDwell();
@@ -796,5 +829,60 @@ $('ask').onclick=()=>{
 $('stopB').onclick=()=>{stopBeacon();target=null};
 $('q').addEventListener('keydown',e=>{if(e.key==='Enter')$('ask').click()});
 
-drawDial();drawMem();drawMap();render();
+/* ─── find test ─── */
+let runs=[],runMode='beacon',runT0=0,runTick=null;
+function fillTgt(){$('tgt').innerHTML=memory.map((m,i)=>
+  '<option value="'+i+'">'+m.label+'</option>').join('')||'<option>— place objects first —</option>';}
+const _dm=drawMem; drawMem=function(){_dm();fillTgt();};
+sw($('modeSw'),'runMode');
+function speakFor(m){
+  const ax=m.x-L2.x,az=m.z-L2.z;
+  const b=wrap(Math.atan2(ax,-az)-L2.yaw),d=Math.hypot(ax,az);
+  const behind=Math.abs(deg(b))>90;
+  return 'Your '+m.label+' are on the '+m.support+', '+
+    (behind?'behind you. ':'')+clock(b)+', about '+d.toFixed(1)+' metres.';
+}
+$('runBtn').onclick=()=>{
+  if(!memory.length)return;
+  audio();if(AC.state==='suspended')AC.resume();
+  const m=memory[+$('tgt').value||0];
+  const pick=cfg.runMode;
+  runMode = pick==='alt' ? (runs.length%2?'speech':'beacon') : pick;
+  target=m;clampSide=0;
+  $('ovlM').textContent=runMode==='beacon'?'beacon + speech':'speech only';
+  $('ovl').style.display='flex';
+  say(speakFor(m));
+  runT0=performance.now();
+  if(runMode==='beacon'){updB();startBeacon('click',2.5);}
+  runTick=setInterval(()=>{$('ovlT').textContent=((performance.now()-runT0)/1000).toFixed(1);},100);
+};
+$('ovl').onclick=()=>{
+  if(!runT0)return;
+  const secs=(performance.now()-runT0)/1000;runT0=0;
+  clearInterval(runTick);stopBeacon();target=null;
+  $('ovl').style.display='none';
+  runs.push({n:runs.length+1,mode:runMode,label:memory[+$('tgt').value||0].label,secs});
+  say(secs.toFixed(0)+' seconds');
+  renderRuns();
+};
+function renderRuns(){
+  const b=runs.filter(r=>r.mode==='beacon').map(r=>r.secs);
+  const sp=runs.filter(r=>r.mode==='speech').map(r=>r.secs);
+  $('rB').textContent=b.length?med(b).toFixed(1):'—';
+  $('rS').textContent=sp.length?med(sp).toFixed(1):'—';
+  $('rN').textContent=runs.length;
+  $('rD').textContent=(b.length&&sp.length)?
+    ((med(sp)-med(b))>=0?'-':'+')+Math.abs(med(sp)-med(b)).toFixed(1)+'s':'—';
+  $('runLog').innerHTML=runs.slice().reverse().map(r=>
+    '<tr><td>'+r.n+'</td><td>'+r.mode+'</td><td>'+r.label+'</td><td>'+
+    r.secs.toFixed(1)+'</td></tr>').join('');
+}
+$('runCsv').onclick=()=>{
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob(['n,mode,target,seconds\n'+
+    runs.map(r=>[r.n,r.mode,r.label,r.secs.toFixed(2)].join(',')).join('\n')],{type:'text/csv'}));
+  a.download='find-runs.csv';a.click();
+};
+
+drawDial();drawMem();drawMap();render();fillTgt();
 </script>

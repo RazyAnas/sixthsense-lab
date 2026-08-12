@@ -236,7 +236,8 @@
     <div class="grid" style="align-content:start">
       <div class="card">
         <h2>Camera</h2>
-        <div class="row"><button class="act" id="camOn">Enable camera</button></div>
+        <div class="row"><button class="act" id="camOn">Enable camera</button>
+          <button class="ghost" id="camFlip">Flip</button></div>
         <label>Horizontal FOV &mdash; <span id="fovV" class="pill">60&deg;</span></label>
         <input type="range" id="fov" min="40" max="100" step="1" value="60">
         <p class="note" id="camMsg" style="margin-top:8px">
@@ -244,7 +245,23 @@
         </p>
       </div>
       <div class="card">
-        <h2>Place object</h2>
+        <h2>Look &amp; remember <span class="pill" id="lookP">needs sensor</span></h2>
+        <p class="note">
+          Phone on your head. Look straight at the object, put it in the middle of
+          the feed, tap Remember. Bearing comes from your head, distance from how
+          far down you are looking. Nothing to click, nothing to measure.
+        </p>
+        <label>Camera height &mdash; <span id="camHV" class="pill">1.5 m</span></label>
+        <input type="range" id="camH" min="0.8" max="2.0" step="0.05" value="1.5">
+        <div class="stats" style="margin-top:10px">
+          <div><div class="stat" id="lookD">&mdash;</div><div class="statlbl">distance</div></div>
+          <div><div class="stat" id="lookB">&mdash;</div><div class="statlbl">bearing</div></div>
+        </div>
+        <button class="act big" id="remember" style="margin-top:12px">Remember this</button>
+      </div>
+
+      <div class="card">
+        <h2>Place object <span class="pill">manual</span></h2>
         <label>Label</label><input type="text" id="lbl" value="keys">
         <label>Resting on</label><input type="text" id="sup" value="table">
         <label>Distance &mdash; <span id="odV" class="pill">2.5 m</span></label>
@@ -318,7 +335,8 @@ const med=a=>{if(!a.length)return null;const s=a.slice().sort((x,y)=>x-y),m=s.le
 const $=id=>document.getElementById(id);
 
 let AC=null,panner=null,master=null,lpf=null,timer=null,noiseBuf=null;
-const S={yaw:0,bearing:0,dist:2.5,playing:false,clamped:false};
+const S={yaw:0,pitch:0,bearing:0,dist:2.5,playing:false,clamped:false};
+let pitchOK=false;
 function audio(){
   if(AC)return AC;
   AC=new(window.AudioContext||window.webkitAudioContext)();
@@ -454,9 +472,20 @@ function onOrient(e){
     probeAxis=best;$('axR').textContent=['X','Y','Z'][probeAxis.indexOf(1)];
   }
   const w=mul(R,probeAxis);
+  // w is the forward axis in world coords; w[2] is its vertical component.
+  S.pitch=Math.asin(Math.max(-1,Math.min(1,w[2])));pitchOK=true;
   const heading=Math.atan2(w[0],w[1]);
   if(refHeading===null)refHeading=heading;
   applyYaw(wrap(heading-refHeading));
+}
+// Distance to a floor point from how far below the horizon you are looking:
+// d = h / tan(depression). Needs no depth sensor and no model.
+function lookDist(){
+  if(!pitchOK)return null;
+  const dep=-S.pitch;
+  if(dep<rad(4))return null;                    // too flat: tan blows up
+  const d=(+$('camH').value)/Math.tan(dep);
+  return (d<0.4||d>8)?null:d;
 }
 function ctxProblems(){
   const p=[];
@@ -727,9 +756,24 @@ const memory=[],L2={x:0,z:0,yaw:0};let pend=null,target=null;
 const map=$('map'),mx=map.getContext('2d'),ovc=$('ov'),oc=ovc.getContext('2d');
 $('fov').oninput=e=>$('fovV').textContent=e.target.value+'\u00B0';
 $('od').oninput=e=>$('odV').textContent=(+e.target.value).toFixed(1)+' m';
+let camFacing='environment',camStream=null;
+async function openCam(){
+  if(camStream){camStream.getTracks().forEach(t=>t.stop());camStream=null}
+  // Without an explicit facingMode, phones hand back the selfie camera.
+  camStream=await navigator.mediaDevices.getUserMedia(
+    {video:{width:{ideal:640},height:{ideal:480},facingMode:{ideal:camFacing}}});
+  $('vid').srcObject=camStream;await $('vid').play();
+  // Mirror the selfie view only, so a click maps to the bearing you mean.
+  $('vid').style.transform=camFacing==='user'?'scaleX(-1)':'none';
+  $('camMsg').textContent=(camFacing==='environment'?'Rear':'Front')+
+    ' camera. Click an object in the feed to set its bearing, then commit.';
+}
+$('camFlip').onclick=async()=>{
+  camFacing=camFacing==='environment'?'user':'environment';
+  try{await openCam()}catch(e){$('camMsg').textContent='Flip failed: '+e.name}
+};
 $('camOn').onclick=async()=>{try{
-  const s=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480}});
-  $('vid').srcObject=s;await $('vid').play();
+  await openCam();
   $('camP').textContent='live';$('camP').className='pill ok';$('camOn').disabled=true;ovLoop();
 }catch(err){$('camP').textContent='blocked';$('camP').className='pill no';
   $('camMsg').innerHTML='<span style="color:var(--bad)">'+err.name+
@@ -739,12 +783,45 @@ function ovLoop(){oc.clearRect(0,0,ovc.width,ovc.height);
     oc.strokeStyle='#4da3ff';oc.lineWidth=2;oc.beginPath();oc.moveTo(p,0);oc.lineTo(p,ovc.height);
     oc.stroke();oc.fillStyle='#4da3ff';oc.font='12px ui-monospace,monospace';
     oc.fillText(deg(pend).toFixed(0)+'\u00B0',p+6,18);}
+  // Centre reticle: what "look at it" actually means. Green once distance is valid.
+  const cx=ovc.width/2,cy=ovc.height/2,d=lookDist();
+  oc.strokeStyle=d?'#3ddc84':'#8b98a8';oc.lineWidth=2;
+  oc.beginPath();oc.arc(cx,cy,16,0,6.284);oc.stroke();
+  oc.beginPath();oc.moveTo(cx-26,cy);oc.lineTo(cx-20,cy);
+  oc.moveTo(cx+20,cy);oc.lineTo(cx+26,cy);
+  oc.moveTo(cx,cy-26);oc.lineTo(cx,cy-20);
+  oc.moveTo(cx,cy+20);oc.lineTo(cx,cy+26);oc.stroke();
+  if(d){oc.fillStyle='#3ddc84';oc.font='bold 15px ui-monospace,monospace';
+    oc.fillText(d.toFixed(1)+' m',cx+30,cy+5);}
   requestAnimationFrame(ovLoop);}
 ovc.addEventListener('click',e=>{const r=ovc.getBoundingClientRect();
   pend=((e.clientX-r.left)/r.width-.5)*rad(+$('fov').value);$('commit').disabled=false;});
 $('commit').onclick=()=>{if(pend===null)return;const p=worldPos(pend,+$('od').value);
   memory.push({label:$('lbl').value.trim()||'object',support:$('sup').value.trim()||'surface',
     x:p.x,z:p.z});pend=null;$('commit').disabled=true;drawMem();drawMap();};
+
+$('camH').oninput=()=>{$('camHV').textContent=(+$('camH').value).toFixed(2)+' m'};
+function lookLoop(){
+  const d=lookDist();
+  $('lookD').textContent=d?d.toFixed(1)+' m':'—';
+  $('lookB').textContent=pitchOK?deg(L2.yaw).toFixed(0)+'°':'—';
+  const p=$('lookP');
+  if(!pitchOK){p.textContent='needs sensor';p.className='pill no'}
+  else if(!d){p.textContent='look further down';p.className='pill'}
+  else {p.textContent='ready';p.className='pill ok'}
+  $('remember').disabled=!d;
+  requestAnimationFrame(lookLoop);
+}
+$('remember').onclick=()=>{
+  const d=lookDist();if(!d)return;
+  // Object sits straight ahead of the head, so its bearing is the head's yaw.
+  const p=worldPos(L2.yaw,d);
+  memory.push({label:$('lbl').value.trim()||'object',
+    support:$('sup').value.trim()||'surface',x:L2.x+p.x,z:L2.z+p.z});
+  drawMem();drawMap();
+  say('Remembered '+($('lbl').value.trim()||'object')+' at '+d.toFixed(1)+' metres');
+};
+lookLoop();
 $('wipe').onclick=()=>{memory.length=0;drawMem();drawMap()};
 function drawMem(){$('mem').innerHTML=memory.length?memory.map(m=>
   '<tr><td>'+m.label+'</td><td>'+m.support+'</td><td>'+m.x.toFixed(2)+'</td><td>'+

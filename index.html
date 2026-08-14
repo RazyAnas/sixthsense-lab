@@ -122,13 +122,28 @@ document.getElementById('go').onclick=async()=>{
 
   const space = await s.requestReferenceSpace('local-floor');
 
-  // Always finish: frames, or a timeout. Never hang on "Testing…" again.
-  let frames=0, posed=0;
-  const done = await new Promise(res=>{
-    const timer=setTimeout(()=>res('timeout'),9000);
+  // Depth buffer coords are not view coords: the spec requires transforming
+  // through normDepthBufferFromNormView before sampling.
+  function sample(di,nx,ny){
+    let x=nx,y=ny;
+    const t=di.normDepthBufferFromNormView;
+    if(t&&t.matrix){
+      const m=t.matrix;
+      x=m[0]*nx+m[4]*ny+m[12];
+      y=m[1]*nx+m[5]*ny+m[13];
+    }
+    if(x<0||x>1||y<0||y>1)return 0;
+    try{ return di.getDepthInMeters(x,y) || 0; }catch(e){ return 0; }
+  }
+
+  // Run until we have real readings or time runs out. A granted feature that
+  // never returns a number is not a usable feature.
+  let frames=0, posed=0, valid=0, res_=null, err='';
+  const vals=[];
+  const done = await new Promise(resolve=>{
+    const timer=setTimeout(()=>resolve('timeout'),20000);
     s.requestAnimationFrame(function loop(t,frame){
       frames++;
-      hudT.textContent='Move the phone slowly… frame '+frames+'/40';
       const pose=frame.getViewerPose(space);
       if(pose){
         posed++;
@@ -136,25 +151,50 @@ document.getElementById('go').onclick=async()=>{
           try{
             const di=frame.getDepthInformation(pose.views[0]);
             if(di){
-              // normalised view coords, so 0.5,0.5 is the centre of the frame
-              const m=di.getDepthInMeters(0.5,0.5);
-              depthDetail=di.width+'×'+di.height+', centre '+m.toFixed(2)+' m';
-            } else if(depthDetail==='—') depthDetail='enabled, no data yet';
-          }catch(e){depthDetail='error: '+e.name+' — '+e.message}
+              res_=di.width+'×'+di.height;
+              // 9-point grid across the middle, like sampling a detection box
+              const grid=[];
+              for(let i=0;i<3;i++)for(let j=0;j<3;j++)
+                grid.push(sample(di,0.35+i*0.15,0.35+j*0.15));
+              const good=grid.filter(v=>v>0.05&&v<8);
+              if(good.length){
+                valid++;
+                good.sort((a,b)=>a-b);
+                vals.push(good[good.length>>1]);   // median of this frame
+              }
+            }
+          }catch(e){ err=e.name+': '+e.message; }
         }
       }
-      if(frames<40) s.requestAnimationFrame(loop);
-      else { clearTimeout(timer); res('frames'); }
+      hudT.textContent = posed<5
+        ? 'Finding the room… move the phone slowly ('+posed+'/5)'
+        : (depthOK
+            ? (vals.length ? vals[vals.length-1].toFixed(2)+' m' : 'no depth yet — aim at a table or floor')
+            : 'tracking ok, no depth on this device');
+      if(valid>=30 || frames>=400){ clearTimeout(timer); resolve('done'); }
+      else s.requestAnimationFrame(loop);
     });
   });
   hud.style.display='none';
+
+  let depthUsable=false;
+  if(vals.length){
+    depthUsable=true;
+    vals.sort((a,b)=>a-b);
+    depthDetail=res_+' · median '+vals[vals.length>>1].toFixed(2)+
+      ' m · range '+vals[0].toFixed(2)+'–'+vals[vals.length-1].toFixed(2)+' m';
+  } else if(depthOK){
+    depthDetail=(res_||'buffer')+' granted, but no valid reading'+(err?' ('+err+')':'');
+  }
 
   row(live,'render layer','frames need a WebGL baseLayer',
       glErr?('failed: '+glErr):'attached', glErr?'no':'ok');
   row(live,'frames received','proves the session is live',
       frames+(done==='timeout'?' (timed out)':''), frames?'ok':'no');
   row(live,'viewer pose','tracking actually locked on',
-      posed+' of '+frames, posed?'ok':'no');
+      posed+' of '+frames, posed>20?'ok':(posed?'mb':'no'));
+  row(live,'depth readings','frames returning a real number',
+      valid+' of '+posed, depthUsable?'ok':'no');
 
   row(live,'local-floor','origin on the floor; free eye height',...yn(floorOK));
   row(live,'depth-sensing','per-pixel distance, no trig needed',...yn(depthOK));
@@ -165,14 +205,24 @@ document.getElementById('go').onclick=async()=>{
 
   await s.end();
 
-  if(depthOK && anchorsOK){
-    v.innerHTML='<b class="ok">Use ARCore depth.</b> This phone gives per-pixel '+
-      'depth and anchors in the browser. Sample the depth map across the detection '+
-      'box and take the median — drop the tan() trig, and objects above eye level '+
-      'start working.';
-  }else if(depthOK){
+  if(posed<5){
+    v.innerHTML='<b class="mb">Tracking never locked on ('+posed+' poses).</b> '+
+      'Not a verdict yet. Run it again in a brighter room, aim at something with '+
+      'texture — a table, a rug, a patterned floor, not a blank wall — and keep '+
+      'the phone moving while it counts.';
+  }else if(depthUsable && anchorsOK){
+    v.innerHTML='<b class="ok">Use ARCore depth.</b> Real readings came back ('+
+      valid+' frames), and anchors are available. Sample the depth map across the '+
+      'detection box and take the median — drop the tan() trig, and objects above '+
+      'eye level start working.';
+  }else if(depthUsable){
     v.innerHTML='<b class="ok">Use ARCore depth</b>, but no anchors — positions may '+
-      'drift over a long session. Fine for a demo, re-verify before the run.';
+      'drift over a long session. Fine for a demo.';
+  }else if(depthOK){
+    v.innerHTML='<b class="mb">Depth is granted but returned nothing usable.</b> '+
+      'The buffer exists ('+(res_||'?')+') and every sample read zero. Try again '+
+      'aiming at a textured surface 1–3 m away. If it stays empty, keep the trig — '+
+      'a feature that never returns a number is not a feature.';
   }else{
     v.innerHTML='<b class="mb">No depth on this device.</b> Keep the trig '+
       '(d = height ÷ tan of the down-angle). It works, it just needs the surface '+

@@ -14,6 +14,17 @@ button:disabled{background:#243039;color:#8b98a8}
 #verdict{margin-top:20px;padding:16px;border-radius:10px;background:#161b22;line-height:1.5}
 h2{font-size:15px;margin:22px 0 4px;color:#8b98a8;font-weight:600}
 </style>
+<div id="hud" style="display:none;position:fixed;inset:0;z-index:200;
+  flex-direction:column;align-items:center;justify-content:center;gap:14px;
+  padding:24px;box-sizing:border-box;touch-action:none;
+  font:600 20px system-ui;color:#fff;text-align:center;
+  text-shadow:0 1px 4px rgba(0,0,0,.9)">
+  <div id="hudT">Starting…</div>
+  <div style="font-size:14px;font-weight:400;opacity:.75">
+    Point the phone at a table or the floor and move it slowly.
+  </div>
+</div>
+
 <h1>SixthSense device probe</h1>
 <p class="s">Part 1 runs on load. Part 2 needs a tap — it starts a real AR
 session, which is the only way to know what this phone actually grants.</p>
@@ -68,17 +79,27 @@ document.getElementById('go').onclick=async()=>{
   v.textContent='Testing…';
   let s=null, depthOK=false, depthDetail='—', anchorsOK=false, floorOK=false;
 
-  // Ask for everything optional, then report what was actually granted.
+  // The page is hidden during an immersive session, so give the session a DOM
+  // overlay root to report progress into.
+  const hud=document.getElementById('hud');
+  hud.style.display='flex';
+  const hudT=document.getElementById('hudT');
+  hudT.textContent='Starting session…';
+
   try{
     s=await navigator.xr.requestSession('immersive-ar',{
       requiredFeatures:['local-floor'],
       optionalFeatures:['depth-sensing','anchors','hit-test','dom-overlay'],
+      domOverlay:{root:hud},
       depthSensing:{usagePreference:['cpu-optimized','gpu-optimized'],
                     dataFormatPreference:['luminance-alpha','float32']}
     });
   }catch(e){
+    hud.style.display='none';
     live.innerHTML='<p class="s no">Session failed: '+e.message+'</p>';
-    v.innerHTML='<b class="no">Could not start a session.</b> '+e.message;
+    v.innerHTML='<b class="no">Could not start a session.</b> '+e.message+
+      '<br><br>If it mentions depth-sensing, this phone does not support it '+
+      'and we keep the trig.';
     return;
   }
 
@@ -87,26 +108,53 @@ document.getElementById('go').onclick=async()=>{
   anchorsOK = enabled.includes('anchors');
   depthOK   = enabled.includes('depth-sensing');
 
+  // A session delivers no animation frames until it has a baseLayer.
+  // Without this the rAF loop never fires and the test hangs forever.
+  let glErr='';
+  try{
+    const canvas=document.createElement('canvas');
+    const gl=canvas.getContext('webgl',{xrCompatible:true})
+          || canvas.getContext('webgl2',{xrCompatible:true});
+    if(!gl) throw new Error('no WebGL context');
+    await gl.makeXRCompatible();
+    s.updateRenderState({baseLayer:new XRWebGLLayer(s,gl)});
+  }catch(e){ glErr=e.message; }
+
   const space = await s.requestReferenceSpace('local-floor');
 
-  await new Promise(res=>{
-    let frames=0;
+  // Always finish: frames, or a timeout. Never hang on "Testing…" again.
+  let frames=0, posed=0;
+  const done = await new Promise(res=>{
+    const timer=setTimeout(()=>res('timeout'),9000);
     s.requestAnimationFrame(function loop(t,frame){
       frames++;
+      hudT.textContent='Move the phone slowly… frame '+frames+'/40';
       const pose=frame.getViewerPose(space);
-      if(pose && depthOK){
-        try{
-          const di=frame.getDepthInformation(pose.views[0]);
-          if(di){
-            // normalised view coords, so 0.5,0.5 is the centre of the frame
-            const m=di.getDepthInMeters(0.5,0.5);
-            depthDetail=di.width+'×'+di.height+', centre '+m.toFixed(2)+' m';
-          } else depthDetail='enabled but no data yet';
-        }catch(e){depthDetail='error: '+e.name}
+      if(pose){
+        posed++;
+        if(depthOK){
+          try{
+            const di=frame.getDepthInformation(pose.views[0]);
+            if(di){
+              // normalised view coords, so 0.5,0.5 is the centre of the frame
+              const m=di.getDepthInMeters(0.5,0.5);
+              depthDetail=di.width+'×'+di.height+', centre '+m.toFixed(2)+' m';
+            } else if(depthDetail==='—') depthDetail='enabled, no data yet';
+          }catch(e){depthDetail='error: '+e.name+' — '+e.message}
+        }
       }
-      if(frames<40) s.requestAnimationFrame(loop); else res();
+      if(frames<40) s.requestAnimationFrame(loop);
+      else { clearTimeout(timer); res('frames'); }
     });
   });
+  hud.style.display='none';
+
+  row(live,'render layer','frames need a WebGL baseLayer',
+      glErr?('failed: '+glErr):'attached', glErr?'no':'ok');
+  row(live,'frames received','proves the session is live',
+      frames+(done==='timeout'?' (timed out)':''), frames?'ok':'no');
+  row(live,'viewer pose','tracking actually locked on',
+      posed+' of '+frames, posed?'ok':'no');
 
   row(live,'local-floor','origin on the floor; free eye height',...yn(floorOK));
   row(live,'depth-sensing','per-pixel distance, no trig needed',...yn(depthOK));

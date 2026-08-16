@@ -1003,7 +1003,18 @@ $('remember').onclick=()=>{
     support:$('sup').value.trim()||'surface',x:L2.x+p.x,z:L2.z+p.z,
     y:S.depth!==null?(+$('camH').value)+S.depth*Math.sin(S.pitch):0,
     src:S.depth!==null?'depth':'trig',seen:Date.now(),sess:xrSessId};
+  // Re-showing an object supersedes any stale copy of it -- and the pair of
+  // positions is a landmark correspondence between the dead coordinate frame
+  // and this one. Two of those are enough to bring the whole room back.
+  for(let i=memory.length-1;i>=0;i--){
+    const o=memory[i];
+    if(o.stale&&o.label===rec.label){
+      addLandmark({x:o.x,z:o.z},{x:rec.x,z:rec.z});
+      memory.splice(i,1);
+    }
+  }
   memory.push(rec);
+  tryRealign();
   if(xrOn&&xrAnchors)anchorQueue.push(rec);
   drawMem();drawMap();saveMem();
   $('lookMsg').textContent='Saved '+($('lbl').value.trim()||'object')+' at '+d.toFixed(1)+' m.';
@@ -1112,11 +1123,16 @@ $('xrOn').onclick=async()=>{
   // move is to mark them and refuse to beacon rather than to guess.
   xrSessId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
   let staleN=0;
-  for(const m of memory){ if(m.sess!==xrSessId){ m.stale=true; staleN++; } }
+  for(const m of memory){
+    m.stale = (m.sess!==xrSessId);
+    if(m.stale) staleN++;
+  }
   if(staleN){
     $('staleBar').style.display='block';
     $('staleMsg').textContent=staleN+' object'+(staleN>1?'s':'')+
-      ' from an earlier session. Their positions are not valid in this one.';
+      ' from an earlier session. Show me two things I already know and I can '+
+      'place them all again.';
+    landmarks.length=0;
   } else $('staleBar').style.display='none';
   drawMem();
   // In a DOM-overlay session a tap on the UI is otherwise consumed as an AR
@@ -1174,6 +1190,65 @@ $('xrOn').onclick=async()=>{
   });
 };
 $('xrOff').onclick=()=>{if(xrSession)xrSession.end()};
+
+// --- bringing a room back after the session restarts -------------------------
+// Chrome ends the XR session when the page is backgrounded or the screen
+// locks, and the next session picks a new world origin. Rather than losing the
+// room, re-show two known objects: both frames are gravity-aligned, so the
+// difference is a yaw and a translation, and two point correspondences pin
+// both exactly.
+const landmarks=[];
+function addLandmark(oldP,newP){
+  landmarks.push({o:oldP,n:newP});
+  if(landmarks.length>2)landmarks.shift();
+}
+function solveRealign(a,b){
+  const dOld=Math.atan2(b.o.x-a.o.x, -(b.o.z-a.o.z));
+  const dNew=Math.atan2(b.n.x-a.n.x, -(b.n.z-a.n.z));
+  const spanOld=Math.hypot(b.o.x-a.o.x, b.o.z-a.o.z);
+  const spanNew=Math.hypot(b.n.x-a.n.x, b.n.z-a.n.z);
+  // Two landmarks nearly on top of each other cannot fix a rotation.
+  if(spanOld<0.4||spanNew<0.4)return null;
+  // A big change in separation means one of them is not the same thing.
+  if(Math.abs(spanOld-spanNew)>Math.max(0.5,0.25*spanOld))return null;
+  const yaw=wrap(dNew-dOld), c=Math.cos(yaw), sn=Math.sin(yaw);
+  // A vector at bearing b is (r·sin b, −r·cos b); rotating it by +yaw must
+  // give bearing b+yaw. That fixes the signs below -- the opposite pair
+  // applies the inverse rotation and scrambles the room.
+  const rot=p=>({x:c*p.x-sn*p.z, z:sn*p.x+c*p.z});
+  const cOld={x:(a.o.x+b.o.x)/2, z:(a.o.z+b.o.z)/2};
+  const cNew={x:(a.n.x+b.n.x)/2, z:(a.n.z+b.n.z)/2};
+  const r=rot(cOld);
+  return {rot, tx:cNew.x-r.x, tz:cNew.z-r.z};
+}
+function tryRealign(){
+  const stale=memory.filter(m=>m.stale);
+  if(!stale.length){landmarks.length=0;$('staleBar').style.display='none';return}
+  if(landmarks.length<2){
+    $('staleMsg').textContent=stale.length+' object'+(stale.length>1?'s':'')+
+      ' from an earlier session. Show me '+(2-landmarks.length)+
+      ' more thing'+(2-landmarks.length>1?'s':'')+' I already know and I can place them again.';
+    return;
+  }
+  const T=solveRealign(landmarks[0],landmarks[1]);
+  if(!T){
+    landmarks.shift();
+    $('staleMsg').textContent='Those two were too close together to line the room up. Show me another.';
+    return;
+  }
+  for(const m of stale){
+    const r=T.rot({x:m.x,z:m.z});
+    m.x=r.x+T.tx; m.z=r.z+T.tz;
+    m.stale=false; m.sess=xrSessId; m.realigned=true;
+  }
+  landmarks.length=0;
+  $('staleBar').style.display='none';
+  drawMem();drawMap();saveMem();
+  const msg='Room lined up again. '+stale.length+' object'+
+            (stale.length>1?'s':'')+' back in place.';
+  $('lookMsg').textContent=msg; if(xrOn)$('hudSay').textContent=msg;
+  earcon('found'); say(msg);
+}
 
 // --- tracking state --------------------------------------------------------
 // A beacon pointing confidently at nothing is worse than silence.
@@ -1354,13 +1429,19 @@ function ageWord(ms){
 }
 // Fixed word order so users stop parsing: certainty, identity, support,
 // direction, distance, age. Truncation happens from the bottom.
+// "Your bag are on the floor" is the kind of thing a judge notices. A few
+// labels are grammatically plural; everything else takes a singular verb.
+const PLURAL=new Set(['keys','glasses','scissors','headphones','earphones',
+  'earbuds','gloves','shoes','slippers','trousers','jeans','sunglasses']);
+const isPlural=l=>PLURAL.has(String(l||'').trim().toLowerCase());
 function describe(m,r){
   const st=stateOf(m), age=ageWord(Date.now()-(m.seen||0));
+  const be=isPlural(m.label)?'are':'is';
   const behind=Math.abs(deg(r.b))>90;
   const where=(behind?'behind you — turn '+(r.b>0?'right':'left')+'. ':'')+
               clock(r.b)+', about '+r.d.toFixed(1)+' metres';
   if(st==='known')
-    return {state:st,text:'Your '+m.label+' are on the '+m.support+', '+where+'.'};
+    return {state:st,text:'Your '+m.label+' '+be+' on the '+m.support+', '+where+'.'};
   if(st==='remembered')
     return {state:st,text:'I last saw your '+m.label+' on the '+m.support+
             ' '+age+'. '+where+'.'};
@@ -1416,9 +1497,14 @@ $('ask').onclick=()=>{
       return m.label+' at '+clock(r.b)+', '+r.d.toFixed(1)+' metres'}).join('; ')
       :'Memory is empty for this room.';}
   else{const wds=q.replace(/where('s| is| are)?|my|the|\?/g,'').trim().split(/\s+/).filter(Boolean);
-    found=memory.find(m=>wds.some(w=>w&&m.label.indexOf(w)>=0));
+    // Prefer a record we can actually point to, and the freshest of those.
+    // Matching the first hit in array order meant a stale record shadowed a
+    // perfectly good one captured seconds ago, so re-capturing never helped.
+    const hits=memory.filter(m=>wds.some(w=>w&&m.label.indexOf(w)>=0))
+      .sort((a,b)=>(!!a.stale-!!b.stale)||((b.seen||0)-(a.seen||0)));
+    found=hits[0]||null;
     if(found){const d=describe(found,rel(found));sent=d.text;ansState=d.state;}
-    else {sent=wds.length?"I don't have "+wds.join(' ')+' in memory for this room.'
+    else {sent=wds.length?"I don't have your "+wds.join(' ')+' in this room.'
       :'Ask me where something is.'; ansState='absent';}}
   // Refuse to point at a position from a dead coordinate frame.
   if(found&&found.stale){

@@ -237,6 +237,11 @@
       <div><div class="stat" id="stObj">0</div><div class="statlbl">objects</div></div>
     </div>
     <p class="note" id="stMsg" style="margin-top:10px"></p>
+    <div id="staleBar" style="display:none;margin-top:10px;padding:10px 12px;
+         border:1px solid var(--warn,#ffb454);border-radius:6px">
+      <p class="note" id="staleMsg" style="margin:0 0 8px;color:var(--ink)"></p>
+      <button class="ghost" id="forgetStale">Forget them</button>
+    </div>
   </div>
   <div class="banner">
     Camera needs a secure origin. Over a hosted https link it works on the phone too.
@@ -412,7 +417,8 @@ const med=a=>{if(!a.length)return null;const s=a.slice().sort((x,y)=>x-y),m=s.le
 const $=id=>document.getElementById(id);
 
 let AC=null,panner=null,master=null,lpf=null,timer=null,noiseBuf=null;
-const S={yaw:0,pitch:0,depth:null,bearing:0,dist:2.5,playing:false,clamped:false};
+const S={yaw:0,pitch:0,depth:null,bearing:0,dist:2.5,remaining:Math.PI,
+         playing:false,clamped:false,onTarget:false};
 let pitchOK=false,xrOn=false;
 function audio(){
   if(AC)return AC;
@@ -451,7 +457,11 @@ function burst(type,muffle){
   lpf.frequency.setTargetAtTime(muffle?900:20000,t,.02);
   if(type==='click'){
     const s=AC.createBufferSource();s.buffer=noiseBuf;
-    const bp=AC.createBiquadFilter();bp.type='bandpass';bp.frequency.value=2200;bp.Q.value=.6;
+    const bp=AC.createBiquadFilter();bp.type='bandpass';
+    // On target the click brightens: a distinct timbre for "pointing at it",
+    // so the user does not have to judge it from rate alone.
+    bp.frequency.value=S.onTarget?3800:2200;
+    bp.Q.value=S.onTarget?1.4:.6;
     s.connect(bp);bp.connect(g);
     g.gain.setValueAtTime(0,t);g.gain.linearRampToValueAtTime(.9,t+.004);
     g.gain.exponentialRampToValueAtTime(.0008,t+.10);s.start(t);s.stop(t+.13);
@@ -469,10 +479,14 @@ function burst(type,muffle){
   }
 }
 let baseRate=2;
+// Pulse rate is the "warmer" cue: it must rise continuously as the remaining
+// rotation shrinks, and must NOT reset when the clamp releases -- that would
+// slow the beacon down at exactly the moment the listener is closing in.
 function curRate(){
-  if(!S.clamped)return baseRate;
-  const rem=Math.abs(S.remaining||Math.PI);          // radians still to turn
-  return baseRate*(1+1.2*(1-Math.min(rem,Math.PI)/Math.PI));  // faster as you close in
+  let rem=Math.abs(S.remaining);
+  if(!Number.isFinite(rem))rem=Math.PI;
+  const t=1-Math.min(rem,Math.PI)/Math.PI;   // 0 = far away, 1 = dead ahead
+  return baseRate*(1+1.4*t);                 // 2.5 Hz -> 6 Hz
 }
 function startBeacon(type,rate){audio();if(AC.state==='suspended')AC.resume();
   stopBeacon();baseRate=rate;S.playing=true;
@@ -481,7 +495,9 @@ function startBeacon(type,rate){audio();if(AC.state==='suspended')AC.resume();
   tick();}
 function stopBeacon(){if(timer){clearTimeout(timer);timer=null}S.playing=false}
 
-const cfg={headSrc:'key',cond:'dynamic',clamp:'off',ef:'off'};
+// Clamp defaults ON: it is the difference between 0% and 25% front-back
+// reversals. The Lab tab can switch it off, but that is a diagnostic.
+const cfg={headSrc:'key',cond:'dynamic',clamp:'on',ef:'off'};
 function sw(el,key,cb){el.querySelectorAll('button').forEach(b=>b.onclick=()=>{
   el.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
   b.classList.add('on');cfg[key]=b.dataset.v;if(cb)cb(b.dataset.v);drawDial();});}
@@ -576,16 +592,22 @@ function surfGuess(name){
 // Fallback when depth is unavailable: d = (camera height - surface height)
 // / tan(depression). Needs a known surface and cannot see above eye level.
 function lookDist(){
+  // A sensor can hand back NaN or Infinity. Anything not finite is "no
+  // reading", never a number we go on to speak aloud.
+  if(!Number.isFinite(S.pitch))return null;
   if(S.depth!==null){
+    if(!Number.isFinite(S.depth)||S.depth<=0)return null;
     const horiz=S.depth*Math.cos(S.pitch);   // slant range -> ground distance
+    if(!Number.isFinite(horiz))return null;
     return (horiz<0.3||horiz>8)?null:horiz;
   }
   if(!pitchOK)return null;
   const dep=-S.pitch;
   if(dep<rad(4))return null;                    // too flat: tan blows up
   const drop=(+$('camH').value)-(+$('surfH').value);
-  if(drop<0.15)return null;                     // surface at or above eye level
+  if(!Number.isFinite(drop)||drop<0.15)return null;  // surface at/above eye level
   const d=drop/Math.tan(dep);
+  if(!Number.isFinite(d))return null;
   return (d<0.4||d>8)?null:d;
 }
 function ctxProblems(){
@@ -962,7 +984,16 @@ function lookBlocker(){
   if(d>8)return 'Too far, or you are looking too level. That reads over eight metres.';
   return null;
 }
+$('forgetStale').onclick=()=>{
+  for(let i=memory.length-1;i>=0;i--)if(memory[i].stale)memory.splice(i,1);
+  $('staleBar').style.display='none';drawMem();drawMap();saveMem();
+  say('Forgotten.');
+};
 $('remember').onclick=()=>{
+  if(xrOn&&!tracking){
+    const m='I’ve lost track of the room. Look around slowly first.';
+    $('lookMsg').textContent=m;say(m);return;
+  }
   const why=lookBlocker();
   if(why){$('lookMsg').textContent=why;say(why);return}
   const d=lookDist();if(!d)return;
@@ -971,7 +1002,7 @@ $('remember').onclick=()=>{
   const rec={label:$('lbl').value.trim()||'object',
     support:$('sup').value.trim()||'surface',x:L2.x+p.x,z:L2.z+p.z,
     y:S.depth!==null?(+$('camH').value)+S.depth*Math.sin(S.pitch):0,
-    src:S.depth!==null?'depth':'trig',seen:Date.now()};
+    src:S.depth!==null?'depth':'trig',seen:Date.now(),sess:xrSessId};
   memory.push(rec);
   if(xrOn&&xrAnchors)anchorQueue.push(rec);
   drawMem();drawMap();saveMem();
@@ -986,7 +1017,8 @@ function saveMem(){try{
   // XRAnchor is a live platform object and cannot be serialised. Persist the
   // coordinate; the anchor is re-created per session.
   const plain=memory.map(m=>({label:m.label,support:m.support,
-    x:m.x,z:m.z,y:m.y||0,src:m.src||'trig',seen:m.seen||Date.now()}));
+    x:m.x,z:m.z,y:m.y||0,src:m.src||'trig',seen:m.seen||Date.now(),
+    sess:m.sess||null}));
   localStorage.setItem(MEMKEY,JSON.stringify({memory:plain,L2:{x:L2.x,z:L2.z}}));
 }catch(e){}}
 function loadMem(){
@@ -1004,7 +1036,7 @@ loadMem();
 // Head orientation alone cannot tell you that you walked three steps. With a
 // viewer pose we get position too, so the beacon stays true while moving and
 // the listener no longer has to return to a fixed spot.
-let xrSession=null,xrSpace=null,xrDepth=false,xrAnchors=false;
+let xrSession=null,xrSpace=null,xrDepth=false,xrAnchors=false,xrSessId=null;
 
 // Depth buffer coords are not view coords -- the spec requires transforming
 // through normDepthBufferFromNormView before sampling.
@@ -1072,6 +1104,21 @@ $('xrOn').onclick=async()=>{
   const feat=xrSession.enabledFeatures||[];
   xrDepth=feat.includes('depth-sensing');
   xrAnchors=feat.includes('anchors');
+
+  // Every AR session picks a fresh world origin wherever the phone happened to
+  // be. Coordinates saved in an earlier session mean nothing in this one, so
+  // restoring them points the beacon at an arbitrary spot. Chrome on Android
+  // has no persistent anchors (that is a Meta Quest feature), so the honest
+  // move is to mark them and refuse to beacon rather than to guess.
+  xrSessId = (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+  let staleN=0;
+  for(const m of memory){ if(m.sess!==xrSessId){ m.stale=true; staleN++; } }
+  if(staleN){
+    $('staleBar').style.display='block';
+    $('staleMsg').textContent=staleN+' object'+(staleN>1?'s':'')+
+      ' from an earlier session. Their positions are not valid in this one.';
+  } else $('staleBar').style.display='none';
+  drawMem();
   // In a DOM-overlay session a tap on the UI is otherwise consumed as an AR
   // "select". Claiming it here is what keeps the buttons clickable.
   $('hud').addEventListener('beforexrselect',e=>e.preventDefault());
@@ -1101,7 +1148,15 @@ $('xrOn').onclick=async()=>{
     if(!xrOn)return;
     xrFrames++;
     const p=frame.getViewerPose(xrSpace);
-    if(p){
+    // Tracking loss does NOT show up as a null pose. The pose keeps arriving
+    // with emulatedPosition=true: orientation still updates while position is
+    // frozen at the last known spot, so the world drags along as you walk and
+    // every bearing silently becomes wrong. This is the bug that made the
+    // beacon point at nothing after leaving the room.
+    if(!p)          setTracking(false,'no pose');
+    else if(p.emulatedPosition) setTracking(false,'position lost');
+    else {
+      setTracking(true);
       xrPosed++;
       const r=poseToRoom(p);
       L2.x=r.x;L2.z=r.z;L2.yaw=r.yaw;
@@ -1119,6 +1174,31 @@ $('xrOn').onclick=async()=>{
   });
 };
 $('xrOff').onclick=()=>{if(xrSession)xrSession.end()};
+
+// --- tracking state --------------------------------------------------------
+// A beacon pointing confidently at nothing is worse than silence.
+let tracking=true,trackMsg='';
+function setTracking(ok,why){
+  if(ok===tracking){if(!ok)S.depth=null;return}
+  tracking=ok;
+  if(!ok){
+    S.depth=null;pitchOK=false;
+    stopBeacon();target=null;
+    trackMsg=why||'tracking lost';
+    $('xrP').textContent='LOST';$('xrP').className='pill no';
+    $('xrMsg').textContent='Lost track of the room ('+trackMsg+
+      '). Positions are unreliable — look around slowly.';
+    if(xrOn)$('hudSay').textContent='Lost the room. Look around slowly.';
+    earcon('lost');
+    say('I have lost track of the room.');
+  }else{
+    $('xrP').textContent='tracking';$('xrP').className='pill ok';
+    $('xrMsg').textContent='Tracking again.';
+    if(xrOn)$('hudSay').textContent='Got the room again.';
+    earcon('found');
+    say('I have the room again.');
+  }
+}
 
 // --- anchors ---------------------------------------------------------------
 // A bare coordinate drifts as ARCore refines its map. An anchor tells the
@@ -1245,16 +1325,78 @@ function updB(){if(!target||!AC)return;
   const ax=target.x-L2.x,az=target.z-L2.z;
   const rel=wrap(Math.atan2(ax,-az)-L2.yaw);
   S.remaining=Math.abs(rel);
+  S.onTarget=S.remaining<rad(12);      // "you are pointing at it"
   const r=applyClamp(rel);S.clamped=r.c;
   setListener(L2.yaw);setListenerPos(L2.x,L2.z);
   const p=worldPos(wrap(L2.yaw+r.b),Math.hypot(ax,az));
   setSource(L2.x+p.x,L2.z+p.z);}
 const clock=b=>{let h=Math.round(deg(wrap(b))/30);if(h<=0)h+=12;return h+" o'clock"};
+
+// --- what the system knows, versus what it only remembers -------------------
+// Three states, and the VERB carries the difference. Saying "your keys are on
+// the table" when it means "were, an hour ago" is the fastest way to lose a
+// user for good.
+const AGE_KNOWN=2*60*1000, AGE_UNSURE=60*60*1000;
+function stateOf(m){
+  const age=Date.now()-(m.seen||0);
+  if(age<AGE_KNOWN)return 'known';
+  if(age<AGE_UNSURE)return 'remembered';
+  return 'unsure';
+}
+function ageWord(ms){
+  if(!Number.isFinite(ms))return 'a while ago';   // never speak "NaN hours"
+  const s=Math.max(0,Math.round(ms/1000));
+  if(s<90)return 'just now';
+  const min=Math.round(s/60);
+  if(min<60)return min+' minute'+(min===1?'':'s')+' ago';
+  const h=Math.round(min/60);
+  return h<=1?'about an hour ago':'about '+h+' hours ago';
+}
+// Fixed word order so users stop parsing: certainty, identity, support,
+// direction, distance, age. Truncation happens from the bottom.
+function describe(m,r){
+  const st=stateOf(m), age=ageWord(Date.now()-(m.seen||0));
+  const behind=Math.abs(deg(r.b))>90;
+  const where=(behind?'behind you — turn '+(r.b>0?'right':'left')+'. ':'')+
+              clock(r.b)+', about '+r.d.toFixed(1)+' metres';
+  if(st==='known')
+    return {state:st,text:'Your '+m.label+' are on the '+m.support+', '+where+'.'};
+  if(st==='remembered')
+    return {state:st,text:'I last saw your '+m.label+' on the '+m.support+
+            ' '+age+'. '+where+'.'};
+  return {state:st,text:'I think your '+m.label+' may still be on the '+
+          m.support+', but that was '+age+'. '+where+'.'};
+}
+// Head-locked state earcons -- routed past the panner, so they are not
+// mistaken for the beacon, which is the only thing that carries direction.
+function earcon(kind){
+  audio();if(AC.state==='suspended')AC.resume();
+  const t=AC.currentTime;
+  const notes={known:[[660,0],[990,.07]], remembered:[[330,0],[495,.07]],
+               unsure:[[420,0],[420,.09]], absent:[[200,0]],
+               lost:[[700,0],[550,.12],[400,.24]], found:[[440,0],[660,.1]]}[kind];
+  if(!notes)return;
+  for(const [f,dt] of notes){
+    const o=AC.createOscillator(),g=AC.createGain();
+    o.type='sine';o.frequency.value=f;o.connect(g);g.connect(master);
+    g.gain.setValueAtTime(0,t+dt);
+    g.gain.linearRampToValueAtTime(.28,t+dt+.008);
+    g.gain.exponentialRampToValueAtTime(.0008,t+dt+.085);
+    o.start(t+dt);o.stop(t+dt+.1);
+  }
+  const hap={known:[20],remembered:[20],unsure:[25,60,25],absent:[80],
+             lost:[200,80,200],found:[40,40,40]}[kind];
+  if(hap&&navigator.vibrate)navigator.vibrate(hap);
+}
 $('ask').onclick=()=>{
   const q=$('q').value.toLowerCase().trim(),t0=performance.now();audio();
+  // Any new question cancels the old beacon. Otherwise a query we cannot
+  // answer leaves the previous target still beeping, pointing at the wrong
+  // thing while the system says it cannot help.
+  stopBeacon();target=null;
   const rel=m=>{const a=m.x-L2.x,b=m.z-L2.z;
     return{b:wrap(Math.atan2(a,-b)-L2.yaw),d:Math.hypot(a,b)}};
-  let sent='',found=null;
+  let sent='',found=null,ansState='known';
   const sec=(lo,hi)=>memory.filter(m=>{const a=deg(rel(m).b);
     return hi===999?Math.abs(a)>135:(a>=lo&&a<=hi)});
   if(/left/.test(q)){const s=sec(-135,-25);found=s[0];
@@ -1275,16 +1417,27 @@ $('ask').onclick=()=>{
       :'Memory is empty for this room.';}
   else{const wds=q.replace(/where('s| is| are)?|my|the|\?/g,'').trim().split(/\s+/).filter(Boolean);
     found=memory.find(m=>wds.some(w=>w&&m.label.indexOf(w)>=0));
-    if(found){const r=rel(found),behind=Math.abs(deg(r.b))>90;
-      sent='Your '+found.label+' are on the '+found.support+', '+
-        (behind?'behind you — turn '+(r.b>0?'right':'left')+'. ':'')+
-        clock(r.b)+', about '+r.d.toFixed(1)+' metres.';}
-    else sent=wds.length?"I don't have "+wds.join(' ')+' in memory for this room.'
-      :'Ask me where something is.';}
+    if(found){const d=describe(found,rel(found));sent=d.text;ansState=d.state;}
+    else {sent=wds.length?"I don't have "+wds.join(' ')+' in memory for this room.'
+      :'Ask me where something is.'; ansState='absent';}}
+  // Refuse to point at a position from a dead coordinate frame.
+  if(found&&found.stale){
+    sent='I remembered your '+found.label+' in an earlier session, so I can’t '+
+         'point to it now. Show it to me again.';
+    found=null;
+  } else if(found&&!tracking){
+    sent='I’ve lost track of the room, so I can’t point to your '+
+         found.label+' right now.';
+    found=null;
+  }
+  // Beacon first, then the state earcon, then speech. The user is already
+  // turning while the sentence is still being spoken.
   if(found){target=found;updB();startBeacon('click',2.5);}
+  else ansState=ansState==='known'?'absent':ansState;
   const ms=performance.now()-t0;
-  $('ans').textContent=sent;setTimeout(()=>say(sent),120);
-  $('lat').innerHTML='beacon at <b>'+ms.toFixed(0)+' ms</b>, speech at ~120 ms'+
+  setTimeout(()=>earcon(ansState),100);
+  $('ans').textContent=sent;setTimeout(()=>say(sent),220);
+  $('lat').innerHTML='beacon at <b>'+ms.toFixed(0)+' ms</b>, earcon ~100 ms, speech ~220 ms'+
     (S.clamped?' · <span style="color:var(--warn)">clamped to frontal edge</span>':'');
 };
 $('stopB').onclick=()=>{stopBeacon();target=null};
